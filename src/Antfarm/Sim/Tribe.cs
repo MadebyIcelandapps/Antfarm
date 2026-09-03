@@ -729,6 +729,14 @@ public sealed class Tribe
     // and got abandoned, every time, and ten tribes grew sideways and down for
     // days. Two projects means the sky crew never has to make that climb.
     private Building _tower;
+
+    /// <summary>
+    /// Cells of the surface district that are finished. A room counts once
+    /// every one of its phases is done, which means floor, walls, ceiling,
+    /// background wall and a light: the same things Terraria itself wants
+    /// before it will call a space a house.
+    /// </summary>
+    private readonly HashSet<(int Col, int Row)> _rooms = new();
     private int _towerLastPending;
     private int _towerStallTicks;
     public string BuildingStatus { get; private set; } = "idle";
@@ -856,6 +864,12 @@ public sealed class Tribe
                 ctx.Events.Add(EventKind.Colony, Id,
                     $"{Name} abandoned a site it could not reach at {proj.X},{proj.GroundY}");
 
+                // Mark an abandoned district cell as done anyway, or the
+                // chooser hands back the same unreachable room for ever and
+                // the whole district stops behind it.
+                if (proj.District)
+                    _rooms.Add((proj.Col, proj.Row));
+
                 BuildingsAbandoned++;
                 proj = null;
                 return;
@@ -886,6 +900,9 @@ public sealed class Tribe
                     proj = null;
                     return;
                 }
+
+                if (proj.District)
+                    _rooms.Add((proj.Col, proj.Row));
 
                 _built.Add(proj);
                 BuildingsFinished++;
@@ -1062,6 +1079,20 @@ public sealed class Tribe
     /// building width at a time, alternating left and right, grows a city out
     /// from the capital instead of a scatter of sheds.
     /// </summary>
+    /// <summary>
+    /// The next room of the surface district.
+    ///
+    /// This used to hand back one enormous tower, up to 120 tiles wide and a
+    /// hundred storeys, as a single project. Nothing that large ever finished,
+    /// so for hours it stood as bare vertical lines in the sky: it was really
+    /// building, and it really did not look like a building.
+    ///
+    /// A district is built the other way round. One room at a time, small
+    /// enough that it always completes, and the next room only starts once the
+    /// last one counts. Rooms share walls and grow outward from the capital
+    /// and upward from the ground, so the structure is a solid finished mass
+    /// at every moment and simply gets bigger. Everything standing is done.
+    /// </summary>
     private Building ChooseTowerLocked(SimContext ctx)
     {
         if (Settlements.Count == 0)
@@ -1069,78 +1100,58 @@ public sealed class Tribe
 
         Settlement site = Settlements[0];
 
-        // A tower starts at the settlement's altitude, full stop.
-        //
-        // SurfaceY scans down for the first genuinely solid ground, and these
-        // tribes have quarried the real surface into swiss cheese, so it kept
-        // reporting "surface" hundreds of tiles below the capital: Ashfang's
-        // tower was sited at y=1210 with its capital at y=448, and Stonewake's
-        // at 1173. They were dutifully building skyscrapers underground, which
-        // is exactly the thing the map said was happening. Anything below this
-        // line is a cellar however tall it is, so it is refused.
-        int floorLimit = site.Y + 30;
+        // The district widens as the tribe earns it, so a young colony builds a
+        // house and an old one builds a quarter.
+        int maxCol = 2 + Rooms / 60;
+        if (maxCol > 40)
+            maxCol = 40;
 
-        int width = TowerWidthLocked();
+        int maxRow = 80;
 
-        for (int attempt = 0; attempt < 64; attempt++)
+        for (int row = 0; row < maxRow; row++)
         {
-            int step = (attempt + 1) / 2;
-            int dir = (attempt % 2 == 0) ? 1 : -1;
-            int x = site.X + dir * step * (width + 6) - width / 2;
-
-            int ground = LevelGround(ctx, x, width);
-
-            if (ground < 0)
-                ground = SurfaceY(ctx, x + width / 2);
-
-            // Too deep to be a tower. Stand it on the settlement's own level
-            // instead and let phase 1 lay its own floor: they have hundreds of
-            // thousands of blocks in the bank and can afford a foundation.
-            if (ground < 0 || ground > floorLimit)
-                ground = site.Y;
-
-            if (ground < 0)
-                continue;
-
-            var b = new Building
+            for (int i = 0; i <= maxCol * 2; i++)
             {
-                X = x,
-                GroundY = ground,
-                Width = width,
-                Storeys = TowerStoreysLocked(ctx, ground),
-                Underground = false,
-            };
+                // Centre outward: 0, 1, -1, 2, -2 ...
+                int col = (i + 1) / 2 * ((i % 2 == 0) ? 1 : -1);
 
-            bool clash = false;
-            foreach (Building other in _built)
-                if (b.Overlaps(other))
+                if (col > maxCol || col < -maxCol)
+                    continue;
+
+                if (_rooms.Contains((col, row)))
+                    continue;
+
+                // Nothing is built on air: a room needs the one below it
+                // finished, unless it is standing on the ground itself.
+                if (row > 0 && !_rooms.Contains((col, row - 1)))
+                    continue;
+
+                int x = site.X - RoomWidth / 2 + col * (RoomWidth - 1);
+                int groundY = site.Y - row * (Building.StoreyHeight - 1);
+
+                if (x < 8 || x + RoomWidth >= ctx.Snapshot.Width - 8 || groundY < 60)
+                    continue;
+
+                return new Building
                 {
-                    clash = true;
-                    break;
-                }
-
-            if (!clash)
-                return b;
+                    X = x,
+                    GroundY = groundY,
+                    Width = RoomWidth,
+                    Storeys = 1,
+                    Underground = false,
+                    District = true,
+                    Col = col,
+                    Row = row,
+                };
+            }
         }
 
         return null;
     }
 
-    /// <summary>
-    /// How tall the next tower gets.
-    ///
-    /// It was 3 + rand(6), so nothing ever passed eight storeys or about forty
-    /// eight tiles, which is a cottage. The brief was towers of up to four
-    /// hundred storeys, and a tribe with a hundred and thirty rooms and twenty
-    /// thousand blocks in the bank has plainly earned more than a cottage.
-    ///
-    /// Height is bought with rooms, so a tower is a record of how much the
-    /// tribe has already built rather than a number picked out of the air, and
-    /// it is then clipped to whatever sky is actually above the site. A tower
-    /// taller than the world would generate thousands of jobs in the ceiling
-    /// that no mason can ever reach, which is the stall this file has been
-    /// chasing all night.
-    /// </summary>
+    /// <summary>One room of the district. Small on purpose: it must finish.</summary>
+    private const int RoomWidth = 14;
+
     /// <summary>
     /// How wide the next tower is. Bought with rooms, like its height, so the
     /// skyline is a record of what the tribe has actually done rather than a

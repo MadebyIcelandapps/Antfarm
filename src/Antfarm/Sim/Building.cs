@@ -46,6 +46,17 @@ public sealed class Building
     public int Stalled;
     public bool Underground;
 
+    /// <summary>
+    /// A cell in the tribe's growing district, rather than a standalone
+    /// building. District rooms share walls with their neighbours, so the
+    /// usual "do not overlap anything already built" rule is skipped for them:
+    /// touching is the entire point.
+    /// </summary>
+    public bool District;
+
+    /// <summary>Which cell of the district this is, if it is one.</summary>
+    public int Col, Row;
+
     public int Phase;
 
     /// <summary>
