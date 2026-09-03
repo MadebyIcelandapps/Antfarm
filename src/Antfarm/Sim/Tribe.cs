@@ -776,10 +776,10 @@ public sealed class Tribe
             AdvanceProject(ctx, block, surface: true,
                            ref _tower, ref _towerLastPending, ref _towerStallTicks);
 
-            SiteX = _current != null ? _current.X + Building.Width / 2 : 0;
+            SiteX = _current != null ? _current.X + _current.Width / 2 : 0;
             SiteY = _current != null ? _current.GroundY : 0;
 
-            TowerX = _tower != null ? _tower.X + Building.Width / 2 : 0;
+            TowerX = _tower != null ? _tower.X + _tower.Width / 2 : 0;
             TowerY = _tower != null ? _tower.GroundY : 0;
             TowerStoreys = _tower?.Storeys ?? 0;
 
@@ -1027,7 +1027,7 @@ public sealed class Tribe
 
         var hall = new Building
         {
-            X = want.X - Building.Width / 2,
+            X = want.X - Building.DefaultWidth / 2,
             GroundY = want.Y,
             Storeys = want.Underground ? 2 + ctx.Rand.Next(3) : 3 + ctx.Rand.Next(5),
             Underground = want.Underground,
@@ -1067,16 +1067,18 @@ public sealed class Tribe
         // line is a cellar however tall it is, so it is refused.
         int floorLimit = site.Y + 30;
 
+        int width = TowerWidthLocked();
+
         for (int attempt = 0; attempt < 64; attempt++)
         {
             int step = (attempt + 1) / 2;
             int dir = (attempt % 2 == 0) ? 1 : -1;
-            int x = site.X + dir * step * (Building.Width + 1) - Building.Width / 2;
+            int x = site.X + dir * step * (width + 6) - width / 2;
 
-            int ground = LevelGround(ctx, x, Building.Width);
+            int ground = LevelGround(ctx, x, width);
 
             if (ground < 0)
-                ground = SurfaceY(ctx, x + Building.Width / 2);
+                ground = SurfaceY(ctx, x + width / 2);
 
             // Too deep to be a tower. Stand it on the settlement's own level
             // instead and let phase 1 lay its own floor: they have hundreds of
@@ -1091,6 +1093,7 @@ public sealed class Tribe
             {
                 X = x,
                 GroundY = ground,
+                Width = width,
                 Storeys = TowerStoreysLocked(ctx, ground),
                 Underground = false,
             };
@@ -1125,6 +1128,17 @@ public sealed class Tribe
     /// that no mason can ever reach, which is the stall this file has been
     /// chasing all night.
     /// </summary>
+    /// <summary>
+    /// How wide the next tower is. Bought with rooms, like its height, so the
+    /// skyline is a record of what the tribe has actually done rather than a
+    /// number picked out of the air. Eleven tiles was a chimney.
+    /// </summary>
+    private int TowerWidthLocked()
+    {
+        int w = 24 + Rooms / 25;
+        return w > 120 ? 120 : w;
+    }
+
     private int TowerStoreysLocked(SimContext ctx, int ground)
     {
         int earned = 6 + Rooms / 2 + ctx.Rand.Next(6);

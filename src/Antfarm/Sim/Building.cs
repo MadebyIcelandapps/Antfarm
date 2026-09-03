@@ -19,7 +19,17 @@ namespace Antfarm.Sim;
 /// </summary>
 public sealed class Building
 {
-    public const int Width = 11;
+    /// <summary>What a hall is, and the fallback for anything unsized.</summary>
+    public const int DefaultWidth = 11;
+
+    /// <summary>
+    /// This building's footprint. It was a constant 11 for everything ever
+    /// built, so a hundred storey tower came out as an eleven tile needle: a
+    /// chimney, not a monument. Halls keep the old size; towers are sized by
+    /// how much the tribe has built, and get wide enough to be worth looking
+    /// at from across the map.
+    /// </summary>
+    public int Width = DefaultWidth;
     public const int StoreyHeight = 6;
 
     public int X;              // left edge
@@ -109,6 +119,14 @@ public sealed class Building
                             Pending.Add(new BuildJob(X, y, block, BuildKind.Block));
 
                         Pending.Add(new BuildJob(Right, y, block, BuildKind.Block));
+
+                        // Internal columns, so a wide building reads as bays
+                        // and piers rather than one enormous hollow box. Two
+                        // outer walls is all a cottage needs; a hundred tile
+                        // frontage needs something holding the middle up.
+                        for (int cx = X + 14; cx < Right - 2; cx += 14)
+                            if (!(s == 0 && (y == floorY - 1 || y == floorY - 2)))
+                                Pending.Add(new BuildJob(cx, y, block, BuildKind.Block));
                     }
                 }
                 break;
@@ -125,12 +143,21 @@ public sealed class Building
             // 4. Background wall through every interior, so it reads as indoors
             //    rather than as a shell you can see the cave through.
             case 4:
-                for (int s = 0; s < Storeys; s++)
+                // Skipped on anything large. Background wall is four rows per
+                // storey across the full frontage, so a 120 wide 100 storey
+                // tower is roughly 48,000 jobs of wallpaper that never shows
+                // on the map and does not hold anything up. On a cottage it is
+                // cheap and makes the inside read as indoors; on a monument it
+                // is the difference between topping out and never finishing.
+                if (Width <= 40)
                 {
-                    int floorY = GroundY - s * (StoreyHeight - 1);
-                    for (int x = X + 1; x <= Right - 1; x++)
-                        for (int y = floorY - StoreyHeight + 2; y <= floorY - 1; y++)
-                            Pending.Add(new BuildJob(x, y, wallItem, BuildKind.Wall));
+                    for (int s = 0; s < Storeys; s++)
+                    {
+                        int floorY = GroundY - s * (StoreyHeight - 1);
+                        for (int x = X + 1; x <= Right - 1; x++)
+                            for (int y = floorY - StoreyHeight + 2; y <= floorY - 1; y++)
+                                Pending.Add(new BuildJob(x, y, wallItem, BuildKind.Wall));
+                    }
                 }
                 break;
 
