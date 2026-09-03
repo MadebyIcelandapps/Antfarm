@@ -144,6 +144,15 @@ public sealed class Tribe
 
     /// <summary>Steps laid by villagers who could not otherwise get anywhere.</summary>
     public long StairsBuilt;
+
+    /// <summary>Traps cleared without setting them off.</summary>
+    public long HazardsDisarmed;
+
+    /// <summary>Sites given up on. Counted apart from BuildingsFinished so the
+    /// two can never be confused again.</summary>
+    public long BuildingsAbandoned;
+
+    private int _sitesChosen;
     public long Births;
 
     /// <summary>Tribe average of each gene, so drift is visible while it happens.</summary>
@@ -683,6 +692,11 @@ public sealed class Tribe
 
             BuiltTiles++;
 
+            // Credit the building, so "did anything actually get built here"
+            // is answerable at the end of the last phase.
+            if (_current != null)
+                _current.BlocksLaid++;
+
             // Counted separately so "are they lighting the tunnels" is a
             // question with an answer, rather than being buried inside the
             // total block count.
@@ -765,15 +779,43 @@ public sealed class Tribe
             {
                 _phaseStallTicks = 0;
                 _current.Pending.Clear();
+                _current.Stalled++;
 
                 ctx.Events.Add(EventKind.Colony, Id,
                     $"{Name} gave up on part of a building it could not finish");
+
+                // A site nobody can reach stalls every phase in turn, and this
+                // net then walks it silently through all six and counts a
+                // finished building at the end. Five tribes reported seven or
+                // eight completed buildings having laid zero blocks between
+                // them. Give up on the site instead of pretending.
+                if (_current.Stalled >= 3 && _current.BlocksLaid == 0)
+                {
+                    ctx.Events.Add(EventKind.Colony, Id,
+                        $"{Name} abandoned a site it could not reach at {_current.X},{_current.GroundY}");
+
+                    BuildingsAbandoned++;
+                    _current = null;
+                    SiteX = SiteY = 0;
+                    BuildingStatus = "abandoned, unreachable";
+                    return;
+                }
             }
 
             if (_current.Pending.Count == 0)
             {
                 if (_current.Phase >= Building.LastPhase)
                 {
+                    // Only a building with blocks in it is a building.
+                    if (_current.BlocksLaid == 0)
+                    {
+                        BuildingsAbandoned++;
+                        _current = null;
+                        SiteX = SiteY = 0;
+                        BuildingStatus = "abandoned, nothing laid";
+                        return;
+                    }
+
                     _built.Add(_current);
                     BuildingsFinished++;
 
@@ -863,9 +905,21 @@ public sealed class Tribe
         if (Settlements.Count == 0)
             return null;
 
-        // A queued site wins: those are halls around caches out at the dig
-        // front, which is where the tribe actually lives.
-        if (_siteQueue.Count > 0)
+        // Halls used to win outright, and that is the whole reason this world
+        // only ever grew downward.
+        //
+        // Cache requests come off the dig front continuously, so the queue was
+        // never empty, so the surface tower branch below this was effectively
+        // dead code. Every site any tribe chose was an underground hall. The
+        // few towers that did get sited were then abandoned silently, because
+        // masons deep in the mines could not climb to them.
+        //
+        // Halls still get priority, because that is where the tribe lives, but
+        // not every time. One building in three is raised on the surface, so
+        // the skyline grows alongside the warren.
+        _sitesChosen++;
+
+        if (_siteQueue.Count > 0 && _sitesChosen % 3 != 0)
         {
             var want = _siteQueue.Dequeue();
 
@@ -906,7 +960,7 @@ public sealed class Tribe
             {
                 X = x,
                 GroundY = ground,
-                Storeys = 3 + ctx.Rand.Next(6),
+                Storeys = TowerStoreysLocked(ctx, ground),
                 Underground = false,
             };
 
@@ -923,6 +977,37 @@ public sealed class Tribe
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// How tall the next tower gets.
+    ///
+    /// It was 3 + rand(6), so nothing ever passed eight storeys or about forty
+    /// eight tiles, which is a cottage. The brief was towers of up to four
+    /// hundred storeys, and a tribe with a hundred and thirty rooms and twenty
+    /// thousand blocks in the bank has plainly earned more than a cottage.
+    ///
+    /// Height is bought with rooms, so a tower is a record of how much the
+    /// tribe has already built rather than a number picked out of the air, and
+    /// it is then clipped to whatever sky is actually above the site. A tower
+    /// taller than the world would generate thousands of jobs in the ceiling
+    /// that no mason can ever reach, which is the stall this file has been
+    /// chasing all night.
+    /// </summary>
+    private int TowerStoreysLocked(SimContext ctx, int ground)
+    {
+        int earned = 3 + Rooms / 4 + ctx.Rand.Next(6);
+
+        if (earned > 400)
+            earned = 400;
+
+        // Leave a margin at the top of the map rather than building into it.
+        int sky = (ground - 40) / (Building.StoreyHeight - 1);
+
+        if (earned > sky)
+            earned = sky;
+
+        return earned < 2 ? 2 : earned;
     }
 
     /// <summary>

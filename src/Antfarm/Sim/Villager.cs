@@ -637,7 +637,17 @@ public sealed class Villager
                     _climbTimer++;
                 }
 
-                if (_climbTimer > 40 && _owner != null && ctx.CanQueue)
+                // Land before laying a step.
+                //
+                // Without this a villager falling down a shaft lays a platform
+                // beside itself every forty ticks, which helps nothing because
+                // it is not standing on anything and cannot step across. A
+                // hundred villagers doing that put twenty to a hundred and
+                // fifty thousand platforms into each tribe's territory within
+                // minutes and turned the surface into scaffolding. A staircase
+                // is built from the ground, one step at a time, by someone
+                // standing on the last step.
+                if (_climbTimer > 40 && OnGround && _owner != null && ctx.CanQueue)
                 {
                     int stairX = FacingRight ? tx + 1 : tx - 1;
 

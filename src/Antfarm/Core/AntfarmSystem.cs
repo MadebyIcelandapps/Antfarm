@@ -813,7 +813,8 @@ public class AntfarmSystem : ModSystem
             Mod.Logger.Info(
                 $"  {t.Name,-12} pop={t.Villagers.Count}/{t.PopulationCap} towns={t.Settlements.Count} " +
                 $"rooms={t.Rooms} idle={idle} out={outbound} ret={returning} build={building} " +
-                $"stock={t.BuildStockCount} built={t.BuiltTiles} stairs={t.StairsBuilt} lost={t.Losses} " +
+                $"stock={t.BuildStockCount} built={t.BuiltTiles} stairs={t.StairsBuilt} " +
+                $"done={t.BuildingsFinished} gaveup={t.BuildingsAbandoned} disarmed={t.HazardsDisarmed} lost={t.Losses} " +
                 $"mined={t.TilesMined} unmapped={t.UnmappedMined} hauling={t.HaulingCount} " +
                 $"deliveries={t.Deliveries} stored={t.ItemsStored} chests={t.Chests.Count}");
         }
@@ -868,6 +869,18 @@ public class AntfarmSystem : ModSystem
         }
     }
 
+    /// <summary>
+    /// Tiles that attack when broken. Wire and pressure plates are included
+    /// because breaking the plate is itself a trigger.
+    /// </summary>
+    private static bool IsHazard(ushort type) =>
+        type == TileID.Traps ||
+        type == TileID.Explosives ||
+        type == TileID.LandMine ||
+        type == TileID.Boulder ||
+        type == TileID.GeyserTrap ||
+        type == TileID.PressurePlates;
+
     private void Apply(in TileOp op)
     {
         if (op.X < 1 || op.Y < 1 || op.X >= Main.maxTilesX - 1 || op.Y >= Main.maxTilesY - 1)
@@ -881,6 +894,34 @@ public class AntfarmSystem : ModSystem
                 if (!t.HasTile)
                 {
                     Snapshot.Set(op.X, op.Y, false);
+                    return;
+                }
+
+                // Disarm hazards, do not set them off.
+                //
+                // Terraria's caverns are laced with dart traps, flame traps,
+                // explosives, land mines and boulders, all wired to fire when
+                // the tile is broken. At five thousand tiles a second the
+                // tribes were detonating every one they met: continuous
+                // explosions and a crossfire of burning darts across the whole
+                // underground, which is what a player standing in it actually
+                // sees and hears. KillTile is what triggers them, so hazards
+                // are cleared straight out of the tile array instead. Nothing
+                // fires, nothing drops, and the tunnel still gets dug.
+                if (IsHazard(t.TileType))
+                {
+                    Main.tile[op.X, op.Y].ClearTile();
+                    Snapshot.Set(op.X, op.Y, false);
+                    Mask.Set(op.X, op.Y, op.TribeId);
+                    NetMessage.SendTileSquare(-1, op.X, op.Y, 1);
+
+                    Tribe disarmed = TribeById(op.TribeId);
+                    if (disarmed != null)
+                    {
+                        disarmed.TilesMined++;
+                        disarmed.HazardsDisarmed++;
+                    }
+
                     return;
                 }
 
@@ -1366,7 +1407,30 @@ public class AntfarmSystem : ModSystem
     /// body, darker head showing facing, and a bright cap on soldiers so an
     /// armed mob arriving at a threat looks like an armed mob arriving.
     /// </summary>
-    private static void DrawOne(Texture2D pixel, float x, float y, Color body,
+    /// <summary>
+    /// One villager per tribe, drawn as an actual person.
+    ///
+    /// They were three coloured rectangles: a body, a smaller head, and a bar
+    /// for a helmet. In a lit room that reads as a crude little figure. In an
+    /// unlit cavern, which is where these tribes actually live, it reads as a
+    /// pale ghost blob, and a few hundred of them at ten different tribe
+    /// colours reads as fireworks going off in your face.
+    ///
+    /// Terraria already ships a townsfolk sprite for every one of these, drawn
+    /// in exactly the right style and already animated, so there is no reason
+    /// to invent art. Each tribe gets its own townsperson, which does the job
+    /// the colours were doing: you can tell at a glance whose tunnel you are
+    /// standing in. The tribe colour survives as a small badge over the head,
+    /// because ten NPC types is identity but not a legend.
+    /// </summary>
+    private static readonly int[] TribeFolk =
+    {
+        NPCID.Guide, NPCID.Merchant, NPCID.Dryad, NPCID.Demolitionist,
+        NPCID.ArmsDealer, NPCID.Clothier, NPCID.Painter, NPCID.Stylist,
+        NPCID.GoblinTinkerer, NPCID.Cyborg,
+    };
+
+    private static void DrawOne(Texture2D pixel, float x, float y, Color body, int tribeId,
                                 bool facingRight, bool soldier, bool undead)
     {
         int tileX = (int)(x / 16f);
@@ -1378,25 +1442,108 @@ public class AntfarmSystem : ModSystem
         // looking at, and true lighting made them invisible in their own
         // unlit tunnels.
         int floor = undead ? 90 : 70;
-        int r = System.Math.Max(body.R * lit.R / 255, body.R * floor / 255);
-        int g = System.Math.Max(body.G * lit.G / 255, body.G * floor / 255);
-        int b = System.Math.Max(body.B * lit.B / 255, body.B * floor / 255);
-        var tint = new Color(r, g, b);
+        int r = System.Math.Max(lit.R, floor);
+        int g = System.Math.Max(lit.G, floor);
+        int b = System.Math.Max(lit.B, floor);
+        var light = new Color(r, g, b);
 
-        var rect = new Rectangle(
-            (int)(x - Main.screenPosition.X - Villager.Width * 0.5f),
-            (int)(y - Main.screenPosition.Y - Villager.Height * 0.5f),
-            (int)Villager.Width,
-            (int)Villager.Height);
+        int npcId = undead
+            ? NPCID.Zombie
+            : TribeFolk[((tribeId % TribeFolk.Length) + TribeFolk.Length) % TribeFolk.Length];
 
-        Main.spriteBatch.Draw(pixel, rect, tint);
+        Texture2D sprite = FolkTexture(npcId);
 
-        var head = new Rectangle(rect.X + (facingRight ? 3 : 0), rect.Y - 4, 7, 6);
-        Main.spriteBatch.Draw(pixel, head, new Color(tint.R / 2, tint.G / 2, tint.B / 2));
+        float screenX = x - Main.screenPosition.X;
+        float screenY = y - Main.screenPosition.Y;
+
+        if (sprite == null)
+        {
+            // The vanilla texture is not loaded yet. Draw the old block rather
+            // than nothing, so a villager is never invisible.
+            var fallback = new Rectangle(
+                (int)(screenX - Villager.Width * 0.5f),
+                (int)(screenY - Villager.Height * 0.5f),
+                (int)Villager.Width, (int)Villager.Height);
+
+            Main.spriteBatch.Draw(pixel, fallback, Multiply(body, light));
+        }
+        else
+        {
+            int frames = Main.npcFrameCount[npcId];
+            if (frames < 1)
+                frames = 1;
+
+            int frameH = sprite.Height / frames;
+
+            // Animate off position rather than a stored counter: a walking
+            // villager cycles, a still one holds a pose, and the ghosts synced
+            // from the server carry no animation state of their own.
+            int frame = (int)(x / 7f) % frames;
+            if (frame < 0)
+                frame += frames;
+
+            var src = new Rectangle(0, frame * frameH, sprite.Width, frameH);
+
+            // Fit the sprite to the body the simulation actually uses, so the
+            // drawing and the collision agree about how big a villager is.
+            float scale = (Villager.Height + 8f) / frameH;
+
+            Main.spriteBatch.Draw(
+                sprite,
+                new Vector2(screenX, screenY),
+                src,
+                light,
+                0f,
+                new Vector2(sprite.Width * 0.5f, frameH * 0.5f),
+                scale,
+                facingRight ? SpriteEffects.None : SpriteEffects.FlipHorizontally,
+                0f);
+        }
+
+        // Tribe badge. Small, over the head, full strength so it stays legible
+        // in the dark: this is the only thing that says which tribe this is.
+        var badge = new Rectangle(
+            (int)(screenX - 2f),
+            (int)(screenY - Villager.Height * 0.5f - 7f),
+            4, 3);
+
+        Main.spriteBatch.Draw(pixel, badge, Multiply(body, light));
 
         if (soldier)
-            Main.spriteBatch.Draw(pixel, new Rectangle(rect.X + 1, rect.Y - 7, 8, 3),
-                new Color(230, 220, 160));
+            Main.spriteBatch.Draw(pixel,
+                new Rectangle(badge.X - 2, badge.Y - 3, 8, 2),
+                Multiply(new Color(230, 220, 160), light));
+    }
+
+    private static Color Multiply(Color c, Color light) =>
+        new Color(c.R * light.R / 255, c.G * light.G / 255, c.B * light.B / 255);
+
+    /// <summary>
+    /// The vanilla townsfolk texture, loaded on demand.
+    ///
+    /// Asking for a texture that has not been loaded yet throws on the drawing
+    /// thread, so this loads it once and hands back null until it is ready
+    /// rather than taking the frame down.
+    /// </summary>
+    private static Texture2D FolkTexture(int npcId)
+    {
+        try
+        {
+            if (TextureAssets.Npc == null || npcId < 0 || npcId >= TextureAssets.Npc.Length)
+                return null;
+
+            if (TextureAssets.Npc[npcId] == null || !TextureAssets.Npc[npcId].IsLoaded)
+            {
+                Main.instance.LoadNPC(npcId);
+                return null;
+            }
+
+            return TextureAssets.Npc[npcId].Value;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -1478,7 +1625,7 @@ public class AntfarmSystem : ModSystem
                     if (g.X < left || g.X > right || g.Y < top || g.Y > bottom)
                         continue;
 
-                    DrawOne(pixel, g.X, g.Y, ColourOf(g.TribeId), g.FacingRight, g.Soldier, g.Undead);
+                    DrawOne(pixel, g.X, g.Y, ColourOf(g.TribeId), g.TribeId, g.FacingRight, g.Soldier, g.Undead);
                     drawn++;
                 }
             }
@@ -1498,7 +1645,7 @@ public class AntfarmSystem : ModSystem
                         if (v.X < left || v.X > right || v.Y < top || v.Y > bottom)
                             continue;
 
-                        DrawOne(pixel, v.X, v.Y, body, v.FacingRight, v.Soldier, v.Undead);
+                        DrawOne(pixel, v.X, v.Y, body, tribe.Id, v.FacingRight, v.Soldier, v.Undead);
                     }
                 }
             }

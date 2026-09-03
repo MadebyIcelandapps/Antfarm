@@ -411,6 +411,7 @@ public sealed class WebObserver
                   .Append(",\"roads\":").Append(t.RoadsBuilt)
                   .Append(",\"torches\":").Append(t.TorchesPlaced)
                   .Append(",\"buildings\":").Append(t.BuildingsFinished)
+                  .Append(",\"abandoned\":").Append(t.BuildingsAbandoned)
                   .Append(",\"site\":\"").Append(Escape(t.BuildingStatus)).Append('"')
                   .Append(",\"trait\":\"").Append(TribeTraits.Describe(t.Trait)).Append('"')
                   .Append(",\"undead\":").Append(t.Undead ? "true" : "false")

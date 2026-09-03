@@ -25,6 +25,15 @@ public sealed class Building
     public int X;              // left edge
     public int GroundY;        // floor level of the lowest storey
     public int Storeys;
+
+    /// <summary>
+    /// Blocks actually laid into this building. A building that finishes with
+    /// zero of them was never built, and must not be counted as one.
+    /// </summary>
+    public int BlocksLaid;
+
+    /// <summary>How many phases of this building the stall net has given up on.</summary>
+    public int Stalled;
     public bool Underground;
 
     public int Phase;
