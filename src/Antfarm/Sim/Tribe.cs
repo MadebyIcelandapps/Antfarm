@@ -681,7 +681,21 @@ public sealed class Tribe
     // Building
     // ------------------------------------------------------------------
 
-    public bool ConsumeBuildItem(int itemType)
+    public bool ConsumeBuildItem(int itemType) => ConsumeBuildItem(itemType, int.MinValue, int.MinValue);
+
+    /// <summary>
+    /// Spend one block from the stores, and credit it to the project it was
+    /// actually laid into.
+    ///
+    /// This credited _current unconditionally, which was correct when there
+    /// was one project and silently wrong the moment there were two: every
+    /// block a mason laid in the surface district was booked to the warren, so
+    /// the room's own BlocksLaid stayed at zero for ever. A room with nothing
+    /// laid in it is treated as never built, so no room could ever complete
+    /// and the district never advanced past its first cell. laid=0 in the
+    /// diagnostics with masons visibly working is what gave it away.
+    /// </summary>
+    public bool ConsumeBuildItem(int itemType, int x, int y)
     {
         lock (_lock)
         {
@@ -695,10 +709,15 @@ public sealed class Tribe
 
             BuiltTiles++;
 
-            // Credit the building, so "did anything actually get built here"
-            // is answerable at the end of the last phase.
-            if (_current != null)
-                _current.BlocksLaid++;
+            // Credit the building the tile belongs to, so "did anything
+            // actually get built here" is answerable at the end of the last
+            // phase, per project.
+            Building credit = Owns(_tower, x, y) ? _tower
+                            : Owns(_current, x, y) ? _current
+                            : _current;
+
+            if (credit != null)
+                credit.BlocksLaid++;
 
             // Counted separately so "are they lighting the tunnels" is a
             // question with an answer, rather than being buried inside the
@@ -809,8 +828,9 @@ public sealed class Tribe
 
             string above = _tower == null
                 ? "no tower"
-                : $"tower p{_tower.Phase} left={_tower.Pending.Count} " +
-                  $"{_tower.Storeys}st at {TowerX},{TowerY}";
+                : $"room p{_tower.Phase} left={_tower.Pending.Count} " +
+                  $"laid={_tower.BlocksLaid} stall={_tower.Stalled} " +
+                  $"cell={_tower.Col},{_tower.Row} done={_rooms.Count} at {TowerX},{TowerY}";
 
             BuildingStatus = below + " | " + above;
         }
@@ -1036,6 +1056,11 @@ public sealed class Tribe
             return sx != 0;
         }
     }
+
+    private static bool Owns(Building b, int x, int y)
+        => b != null && x != int.MinValue &&
+           x >= b.X - 1 && x <= b.Right + 1 &&
+           y <= b.GroundY + 2 && y >= b.TopY - 2;
 
     private int BestBlockLocked()
     {

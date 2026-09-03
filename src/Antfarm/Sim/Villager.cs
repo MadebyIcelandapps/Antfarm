@@ -404,23 +404,23 @@ public sealed class Villager
                 break;
 
             case BuildKind.Wall:
-                if (tribe.ConsumeBuildItem(BuildItem))
+                if (tribe.ConsumeBuildItem(BuildItem, TargetX, TargetY))
                     ctx.Queue(TileOp.Wall(TargetX, TargetY,
                         Architect.WallTileFor(BuildItem), TribeId));
                 break;
 
             case BuildKind.Platform:
-                if (tribe.ConsumeBuildItem(BuildItem))
+                if (tribe.ConsumeBuildItem(BuildItem, TargetX, TargetY))
                     ctx.Queue(TileOp.Platform(TargetX, TargetY, TileID.Platforms, TribeId));
                 break;
 
             case BuildKind.Torch:
-                if (tribe.ConsumeBuildItem(BuildItem))
+                if (tribe.ConsumeBuildItem(BuildItem, TargetX, TargetY))
                     ctx.Queue(TileOp.Place(TargetX, TargetY, TileID.Torches, TribeId));
                 break;
 
             default:
-                if (tribe.ConsumeBuildItem(BuildItem))
+                if (tribe.ConsumeBuildItem(BuildItem, TargetX, TargetY))
                 {
                     ushort tile = Materials.TileFor(BuildItem);
                     if (tile != 0)
