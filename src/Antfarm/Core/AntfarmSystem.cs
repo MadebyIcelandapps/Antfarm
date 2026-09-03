@@ -813,7 +813,7 @@ public class AntfarmSystem : ModSystem
             Mod.Logger.Info(
                 $"  {t.Name,-12} pop={t.Villagers.Count}/{t.PopulationCap} towns={t.Settlements.Count} " +
                 $"rooms={t.Rooms} idle={idle} out={outbound} ret={returning} build={building} " +
-                $"stock={t.BuildStockCount} built={t.BuiltTiles} lost={t.Losses} " +
+                $"stock={t.BuildStockCount} built={t.BuiltTiles} stairs={t.StairsBuilt} lost={t.Losses} " +
                 $"mined={t.TilesMined} unmapped={t.UnmappedMined} hauling={t.HaulingCount} " +
                 $"deliveries={t.Deliveries} stored={t.ItemsStored} chests={t.Chests.Count}");
         }

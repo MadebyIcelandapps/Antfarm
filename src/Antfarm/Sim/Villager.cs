@@ -123,6 +123,11 @@ public sealed class Villager
 
     /// <summary>Closest we have got to the current goal, for detecting no progress.</summary>
     private int _bestDist = int.MaxValue;
+
+    // Height is tracked apart from distance because climbing is the only part
+    // of moving that can fail outright. See the staircase in MoveToward.
+    private int _bestY = int.MaxValue;
+    private int _climbTimer;
     private VillagerTask _lastTask = VillagerTask.Idle;
 
     public int TileX => (int)(X / TileSize);
@@ -165,6 +170,8 @@ public sealed class Villager
         {
             _lastTask = Task;
             _bestDist = int.MaxValue;
+            _bestY = int.MaxValue;
+            _climbTimer = 0;
             _stuckTimer = 0;
         }
 
@@ -604,22 +611,53 @@ public sealed class Villager
                     VelY = -6.2f;
                 }
 
-                // If hopping is not getting us anywhere, build a step.
+                // If hopping is not gaining height, build a step.
                 //
-                // They have quarried the whole surface into pits they cannot
-                // climb out of, and a villager that cannot reach its target
-                // simply stops. That is why construction stalled: masons were
-                // handed jobs they could never walk to. Rather than stand
-                // there, lay a platform and make a staircase out of the hole.
-                if (_stuckTimer > 90 && _owner != null && ctx.CanQueue)
+                // Descending is free and ascending is not, so a tribe that digs
+                // for a week ends up at the bottom of its own quarry with every
+                // job far above it. This is the escape, and it used to be gated
+                // on _stuckTimer, which measures straight line distance to the
+                // target and is the wrong instrument entirely: a villager
+                // bouncing under a ledge sets a new closest approach on almost
+                // every hop, so the timer reset before it ever reached ninety
+                // and the staircase was never built. Four tribes sat frozen
+                // with every villager outbound, zero tiles mined and stuck
+                // timers stuck in the forties.
+                //
+                // Height is its own measurement. If the highest row reached has
+                // not improved in forty ticks, hopping has failed, whatever the
+                // distance is doing, and it is time to lay a step.
+                if (ty < _bestY)
+                {
+                    _bestY = ty;
+                    _climbTimer = 0;
+                }
+                else
+                {
+                    _climbTimer++;
+                }
+
+                if (_climbTimer > 40 && _owner != null && ctx.CanQueue)
                 {
                     int stairX = FacingRight ? tx + 1 : tx - 1;
 
+                    // One across and one up per step, laid repeatedly, is a
+                    // staircase. Rock in the way is quarried rather than
+                    // treated as a dead end: with the target directly overhead
+                    // dx is zero, so the horizontal branch above never runs and
+                    // nothing else in this function would ever clear it.
                     if (ctx.Snapshot.IsOpen(stairX, ty) && ctx.Snapshot.IsOpen(stairX, ty - 1))
                     {
                         ctx.Queue(TileOp.Platform(stairX, ty, TileID.Platforms, TribeId));
                         _owner.StairsBuilt++;
-                        _stuckTimer = 0;
+                        _climbTimer = 0;
+                        _bestY = int.MaxValue;
+                    }
+                    else if (dig)
+                    {
+                        Dig(ctx, stairX, ty);
+                        Dig(ctx, stairX, ty - 1);
+                        _climbTimer = 20;
                     }
                 }
             }
