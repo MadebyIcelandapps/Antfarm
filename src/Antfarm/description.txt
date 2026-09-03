@@ -1,0 +1,6 @@
+Ten rival tribes are seeded into your world. Every villager is an individual:
+they mine, they haul, they build, they fight, and they never stop.
+
+Leave the game running and come back to tunnels, halls, vaults and towers that
+were not there before. The colony brain runs on its own thread, so it keeps
+full speed while the window is in the background.

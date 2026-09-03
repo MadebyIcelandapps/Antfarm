@@ -1,0 +1,11 @@
+# Build and tool scratch. All of this is regenerated.
+.tmp/
+.nuget/
+.check/obj/
+.check/bin/
+**/obj/
+**/bin/
+
+# tModLoader's save tree: worlds, players, built mods, timelapse archives.
+# Worlds are 12 MB and change every minute; they are data, not source.
+saves/

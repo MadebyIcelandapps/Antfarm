@@ -1,0 +1,95 @@
+Mods: {
+	Antfarm: {
+		Configs: {
+			AntfarmConfig: {
+				DisplayName: Antfarm
+
+				Headers: {
+					Colony: Colony
+					Performance: Performance
+					Visuals: Visuals
+					ObservationWindow: Observation window
+				}
+
+				ObserverEnabled: {
+					Label: Enable observation window
+					Tooltip:
+						'''
+						Serves a live map of the world in your browser so you can watch the tribes
+						dig without Terraria being open.
+						'''
+				}
+
+				ObserverPort: {
+					Label: Observation window port
+					Tooltip: The page is served at http://localhost:<port>/
+				}
+
+				TribeCount: {
+					Label: Number of tribes
+					Tooltip: How many rival tribes are seeded into a new world.
+				}
+
+				VillagersPerTribe: {
+					Label: Villagers per tribe
+					Tooltip:
+						'''
+						Villagers are not vanilla NPCs, so this is not bound by the 200 creature cap.
+						Total population is this number times the tribe count.
+						'''
+				}
+
+				TileOpsPerTick: {
+					Label: Tile changes per tick
+					Tooltip:
+						'''
+						The single most important number in the mod.
+						Terraria applies tile, light and liquid updates on the main thread, so this
+						is what protects your framerate. Raise it for a faster world, lower it if
+						the game stutters.
+						'''
+				}
+
+				UnfocusedBudgetMultiplier: {
+					Label: Background speed multiplier
+					Tooltip:
+						'''
+						Applied to the tile budget while the game window is not focused.
+						There is nothing to render when you are alt-tabbed, so the tribes get to
+						spend that time building instead.
+						'''
+				}
+
+				SimHz: {
+					Label: Simulation rate (Hz)
+					Tooltip: How often the colony brain thinks, independent of your framerate.
+				}
+
+				TickWhenEmpty: {
+					Label: Keep building with nobody online
+					Tooltip:
+						'''
+						Dedicated servers only. Terraria stops updating the world when no players
+						are connected, which freezes the tribes mid dig until somebody logs in.
+						Leave this on to keep the colony building around the clock.
+						'''
+				}
+
+				DrawVillagers: {
+					Label: Draw villagers
+					Tooltip: Turn off to hide villagers entirely. They keep working.
+				}
+
+				TimelapseEnabled: {
+					Label: Timelapse Enabled
+					Tooltip: ""
+				}
+
+				TimelapseMinutes: {
+					Label: Timelapse Minutes
+					Tooltip: ""
+				}
+			}
+		}
+	}
+}
