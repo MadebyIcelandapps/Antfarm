@@ -980,6 +980,32 @@ public class AntfarmSystem : ModSystem
         type == TileID.GeyserTrap ||
         type == TileID.PressurePlates;
 
+    /// <summary>True if a chest is resting on this tile, or sits in it.</summary>
+    private static bool Supports(int x, int y)
+    {
+        for (int dy = -1; dy <= 0; dy++)
+        {
+            int ty = y + dy;
+            if (ty < 1 || ty >= Main.maxTilesY - 1)
+                continue;
+
+            for (int dx = 0; dx <= 1; dx++)
+            {
+                int tx = x - dx;
+                if (tx < 1 || tx >= Main.maxTilesX - 1)
+                    continue;
+
+                Tile t = Main.tile[tx, ty];
+
+                if (t.HasTile &&
+                    (t.TileType == TileID.Containers || t.TileType == TileID.Containers2))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Remove torches hanging on a tile that is about to be mined, without
     /// letting them drop. They were going to be destroyed either way.
@@ -1045,6 +1071,17 @@ public class AntfarmSystem : ModSystem
                 // of glowing bobbing torch items in a dark cavern is what a
                 // player standing in it sees, and it is why nothing else could
                 // drop either, the cap being full of them.
+                // Never mine a chest's floor out from under it.
+                //
+                // A chest is held up by the tile beneath it, and when that goes
+                // the chest breaks and drops as an item with everything inside
+                // it. The tribes were tunnelling under their own caches: two
+                // dozen chests loose on the ground at once, each one a granary
+                // that fell on the floor. The chest tile itself was already
+                // protected; its foundation was not, which protected nothing.
+                if (Supports(op.X, op.Y))
+                    return;
+
                 ClearAttachedTorches(op.X, op.Y);
 
                 if (IsHazard(t.TileType))
