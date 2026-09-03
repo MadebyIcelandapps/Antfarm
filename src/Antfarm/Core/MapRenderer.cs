@@ -126,9 +126,23 @@ public static class MapRenderer
                                 tally[(m - 1) & 31] = 0;
                         }
 
-                buf[rowBase + vx] = bestCount >= open && bestCount >= solid && bestTribe >= 0
-                    ? (byte)(2 + bestTribe)
-                    : (open >= solid ? (byte)0 : (byte)1);
+                // Territory is drawn thicker than true scale, on purpose.
+                //
+                // A tunnel is one or two tiles wide, so in an 8x8 block it is
+                // about an eighth of the tiles and can never win a majority. A
+                // majority rule rendered the tribes at 0.025% of the map:
+                // stable, and blank. Every map ever drawn has this problem with
+                // thin features and solves it the same way, which is why roads
+                // are wider than scale on a road atlas.
+                //
+                // So any tribe work in a block colours it. Rock against hollow
+                // is still decided by majority, which is what stopped the
+                // coastline flickering. The zoom label tells you the scale, and
+                // zooming in shows the true width.
+                buf[rowBase + vx] =
+                    bestTribe >= 0 ? (byte)(2 + bestTribe)
+                    : open >= solid ? (byte)0
+                    : (byte)1;
 
             }
         }
