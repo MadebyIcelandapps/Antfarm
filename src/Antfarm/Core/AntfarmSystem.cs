@@ -377,6 +377,7 @@ public class AntfarmSystem : ModSystem
         Snapshot.Sweep(8);
 
         ApplyOps();
+        SweepLitter();
         FlushStockpiles();
         Raids();
         Defend();
@@ -947,6 +948,58 @@ public class AntfarmSystem : ModSystem
             }
         }
     }
+
+    private int _litterCursor;
+
+    /// <summary>
+    /// Sweep the tribes' litter off the floor.
+    ///
+    /// Mining already drops nothing, but Terraria drops attached decorations
+    /// on its own when it re-frames a tile that has lost its support, and at
+    /// several thousand tile operations a second that beats any per tile
+    /// guard. The result was a world item cap of 400 sitting permanently full,
+    /// 364 of them torches: a cavern full of glowing bobbing litter, which is
+    /// what a player standing in the tunnels was seeing, and no room left for
+    /// a real ore drop to ever appear.
+    ///
+    /// So the litter is swept. Only what the tribes shed - torches, platforms
+    /// and the bulk blocks they build with - is taken. Ore, coins, stars and
+    /// anything else a player might actually want are left where they fall,
+    /// which is the whole reason this is a list and not a wipe.
+    /// </summary>
+    private void SweepLitter()
+    {
+        for (int n = 0; n < 64; n++)
+        {
+            _litterCursor++;
+            if (_litterCursor >= Main.maxItems)
+                _litterCursor = 0;
+
+            Item it = Main.item[_litterCursor];
+
+            if (it == null || !it.active || it.type <= 0)
+                continue;
+
+            if (!IsLitter(it.type))
+                continue;
+
+            it.active = false;
+            it.TurnToAir();
+            NetMessage.SendData(MessageID.SyncItem, -1, -1, null, _litterCursor);
+        }
+    }
+
+    private static bool IsLitter(int itemType) =>
+        itemType == ItemID.Torch ||
+        itemType == ItemID.WoodPlatform ||
+        itemType == ItemID.StoneBlock ||
+        itemType == ItemID.DirtBlock ||
+        itemType == ItemID.Wood ||
+        itemType == ItemID.Cobweb ||
+        itemType == ItemID.SiltBlock ||
+        itemType == ItemID.SandBlock ||
+        itemType == ItemID.MudBlock ||
+        itemType == ItemID.ClayBlock;
 
     private void ApplyOps()
     {
