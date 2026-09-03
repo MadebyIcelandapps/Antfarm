@@ -148,7 +148,12 @@ internal static class ObserverPage
           p[1] = pack(58, 62, 71);       // untouched rock
           for (const t of tribes) {
             const h = t.colour;
-            p[2 + t.id] = pack(parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16));
+            const r = parseInt(h.slice(1,3),16), g = parseInt(h.slice(3,5),16), b = parseInt(h.slice(5,7),16);
+            p[2 + t.id] = pack(r, g, b);
+            // Masonry, drawn bright against the tribe's own excavation, so a
+            // tower reads as a tower and not as more tunnel.
+            const lift = (v) => Math.min(255, Math.round(v * 0.45 + 150));
+            p[12 + t.id] = pack(lift(r), lift(g), lift(b));
           }
           pal32 = p;
         }

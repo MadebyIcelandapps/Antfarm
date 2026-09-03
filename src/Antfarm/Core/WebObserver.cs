@@ -361,7 +361,7 @@ public sealed class WebObserver
     /// zoom the step reaches 1 and you are looking at individual tiles.
     /// </summary>
     private byte[] BuildMap(int regionX, int regionY, int regionW, int regionH)
-        => MapRenderer.Build(_system.Snapshot, _system.Mask, regionX, regionY, regionW, regionH);
+        => MapRenderer.Build(_system.Snapshot, _system.Mask, _system.BuiltMask, regionX, regionY, regionW, regionH);
 
     private string BuildStats()
     {

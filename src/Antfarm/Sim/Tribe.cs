@@ -148,11 +148,14 @@ public sealed class Tribe
     /// <summary>Traps cleared without setting them off.</summary>
     public long HazardsDisarmed;
 
+    /// <summary>Villagers within 60 tiles of the settlement's altitude, and
+    /// masons among them. If the first is zero no tower can ever be staffed.</summary>
+    public int SkyFolk, SkyMasons, MasonMedianDepth;
+
     /// <summary>Sites given up on. Counted apart from BuildingsFinished so the
     /// two can never be confused again.</summary>
     public long BuildingsAbandoned;
 
-    private int _sitesChosen;
     public long Births;
 
     /// <summary>Tribe average of each gene, so drift is visible while it happens.</summary>
@@ -716,10 +719,28 @@ public sealed class Tribe
     public int BuildingsFinished;
     private int _lastPending = -1;
     private int _phaseStallTicks;
+
+    // The surface project, run at the same time as the warren below.
+    //
+    // One project at a time was why nothing ever went up. A tribe would pick
+    // an underground hall, every mason would walk down to it, and by the time
+    // a surface tower came round those same masons were hundreds of tiles
+    // below the sky, facing the one thing they are worst at. The tower stalled
+    // and got abandoned, every time, and ten tribes grew sideways and down for
+    // days. Two projects means the sky crew never has to make that climb.
+    private Building _tower;
+    private int _towerLastPending;
+    private int _towerStallTicks;
     public string BuildingStatus { get; private set; } = "idle";
 
     /// <summary>Where the crew should be standing. Zero when there is no site.</summary>
     public int SiteX, SiteY;
+
+    /// <summary>Where the surface tower is going up, or 0 if there is none.</summary>
+    public int TowerX, TowerY;
+
+    /// <summary>Storeys in the tower currently being raised, for the panel.</summary>
+    public int TowerStoreys;
 
     /// <summary>
     /// Move the building along, judged against the world rather than against
@@ -747,97 +768,131 @@ public sealed class Tribe
                 return;
             }
 
-            if (_current == null)
+            // Both projects run every tick. The warren is where the tribe
+            // lives; the tower is what you can see from a mile away.
+            AdvanceProject(ctx, block, surface: false,
+                           ref _current, ref _lastPending, ref _phaseStallTicks);
+
+            AdvanceProject(ctx, block, surface: true,
+                           ref _tower, ref _towerLastPending, ref _towerStallTicks);
+
+            SiteX = _current != null ? _current.X + Building.Width / 2 : 0;
+            SiteY = _current != null ? _current.GroundY : 0;
+
+            TowerX = _tower != null ? _tower.X + Building.Width / 2 : 0;
+            TowerY = _tower != null ? _tower.GroundY : 0;
+            TowerStoreys = _tower?.Storeys ?? 0;
+
+            string below = _current == null
+                ? "warren idle"
+                : $"warren p{_current.Phase} left={_current.Pending.Count} at {SiteX},{SiteY}";
+
+            string above = _tower == null
+                ? "no tower"
+                : $"tower p{_tower.Phase} left={_tower.Pending.Count} " +
+                  $"{_tower.Storeys}st at {TowerX},{TowerY}";
+
+            BuildingStatus = below + " | " + above;
+        }
+    }
+
+    /// <summary>
+    /// One construction project, moved along one step. Judged against the
+    /// world rather than against bookkeeping.
+    ///
+    /// Every earlier version tracked handed-out jobs, claims and an outstanding
+    /// counter, and every one of them deadlocked: a mason that wandered off,
+    /// died or got yanked to a fight left the counter permanently wrong and the
+    /// phase never ended. Fifteen deploys placed zero blocks between them.
+    ///
+    /// A job is finished when the tile actually looks right, which no amount of
+    /// villager misbehaviour can corrupt. Jobs are never removed on hand-out,
+    /// so two masons doing the same tile is merely wasteful, and a mason that
+    /// vanishes costs nothing at all.
+    /// </summary>
+    private void AdvanceProject(SimContext ctx, int block, bool surface,
+                                ref Building proj, ref int lastPending, ref int stallTicks)
+    {
+        if (proj == null)
+        {
+            proj = surface ? ChooseTowerLocked(ctx) : ChooseHallLocked(ctx);
+
+            if (proj == null)
+                return;
+
+            proj.Phase = 0;
+            proj.GeneratePhase(block, ctx);
+        }
+
+        // Drop everything the world already satisfies.
+        for (int i = proj.Pending.Count - 1; i >= 0; i--)
+            if (!Building.StillNeeded(ctx, proj.Pending[i]))
+                proj.Pending.RemoveAt(i);
+
+        // Safety net: a phase that makes no progress for two minutes is being
+        // blocked by something nobody can do, so move on rather than stopping
+        // construction for ever. One indestructible tile used to freeze a
+        // tribe permanently at phase 0.
+        if (proj.Pending.Count != lastPending)
+        {
+            lastPending = proj.Pending.Count;
+            stallTicks = 0;
+        }
+        else if (++stallTicks > 6)
+        {
+            stallTicks = 0;
+            proj.Pending.Clear();
+            proj.Stalled++;
+
+            ctx.Events.Add(EventKind.Colony, Id,
+                $"{Name} gave up on part of a building it could not finish");
+
+            // A site nobody can reach stalls every phase in turn, and this net
+            // then walks it silently through all six and counts a finished
+            // building at the end. Five tribes reported seven or eight
+            // completed buildings having laid zero blocks between them.
+            if (proj.Stalled >= 3 && proj.BlocksLaid == 0)
             {
-                _current = ChooseSiteLocked(ctx, HomeX, HomeY);
-
-                if (_current == null)
-                {
-                    BuildingStatus = "no site";
-                    return;
-                }
-
-                _current.Phase = 0;
-                _current.GeneratePhase(block, ctx);
-            }
-
-            // Drop everything the world already satisfies.
-            for (int i = _current.Pending.Count - 1; i >= 0; i--)
-                if (!Building.StillNeeded(ctx, _current.Pending[i]))
-                    _current.Pending.RemoveAt(i);
-
-            // Safety net: a phase that makes no progress for two minutes is
-            // being blocked by something nobody can do, so move on rather than
-            // stopping the tribe's construction for ever. One indestructible
-            // tile used to freeze a tribe permanently at phase 0.
-            if (_current.Pending.Count != _lastPending)
-            {
-                _lastPending = _current.Pending.Count;
-                _phaseStallTicks = 0;
-            }
-            else if (++_phaseStallTicks > 6)
-            {
-                _phaseStallTicks = 0;
-                _current.Pending.Clear();
-                _current.Stalled++;
-
                 ctx.Events.Add(EventKind.Colony, Id,
-                    $"{Name} gave up on part of a building it could not finish");
+                    $"{Name} abandoned a site it could not reach at {proj.X},{proj.GroundY}");
 
-                // A site nobody can reach stalls every phase in turn, and this
-                // net then walks it silently through all six and counts a
-                // finished building at the end. Five tribes reported seven or
-                // eight completed buildings having laid zero blocks between
-                // them. Give up on the site instead of pretending.
-                if (_current.Stalled >= 3 && _current.BlocksLaid == 0)
-                {
-                    ctx.Events.Add(EventKind.Colony, Id,
-                        $"{Name} abandoned a site it could not reach at {_current.X},{_current.GroundY}");
-
-                    BuildingsAbandoned++;
-                    _current = null;
-                    SiteX = SiteY = 0;
-                    BuildingStatus = "abandoned, unreachable";
-                    return;
-                }
+                BuildingsAbandoned++;
+                proj = null;
+                return;
             }
+        }
 
-            if (_current.Pending.Count == 0)
+        if (proj.Pending.Count == 0)
+        {
+            if (proj.Phase >= Building.LastPhase)
             {
-                if (_current.Phase >= Building.LastPhase)
+                // Only a building with blocks in it is a building.
+                if (proj.BlocksLaid == 0)
                 {
-                    // Only a building with blocks in it is a building.
-                    if (_current.BlocksLaid == 0)
-                    {
-                        BuildingsAbandoned++;
-                        _current = null;
-                        SiteX = SiteY = 0;
-                        BuildingStatus = "abandoned, nothing laid";
-                        return;
-                    }
-
-                    _built.Add(_current);
-                    BuildingsFinished++;
-
-                    if (_built.Count > 64)
-                        _built.RemoveRange(0, 32);
-
-                    _current = null;
-                    SiteX = SiteY = 0;
-                    BuildingStatus = "finished one";
+                    BuildingsAbandoned++;
+                    proj = null;
                     return;
                 }
 
-                _current.Phase++;
-                _current.GeneratePhase(block, ctx);
+                _built.Add(proj);
+                BuildingsFinished++;
+
+                if (proj.Underground)
+                    ctx.Events.Add(EventKind.Colony, Id,
+                        $"{Name} finished a hall at {proj.X},{proj.GroundY}");
+                else
+                    ctx.Events.Add(EventKind.Colony, Id,
+                        $"{Name} topped out a {proj.Storeys} storey tower at {proj.X},{proj.GroundY}");
+
+                if (_built.Count > 64)
+                    _built.RemoveRange(0, 32);
+
+                proj = null;
+                return;
             }
 
-            SiteX = _current.X + Building.Width / 2;
-            SiteY = _current.GroundY;
-
-            BuildingStatus =
-                $"phase {_current.Phase} left={_current.Pending.Count} " +
-                $"at {SiteX},{SiteY}" + (_current.Underground ? " hall" : " tower");
+            proj.Phase++;
+            proj.GeneratePhase(block, ctx);
         }
     }
 
@@ -852,33 +907,91 @@ public sealed class Tribe
 
         lock (_lock)
         {
-            if (_current == null || _current.Pending.Count == 0)
-                return false;
-
+            // Both projects are open for work. A mason takes whatever is
+            // nearest to it, which sorts the crews out by itself: whoever is
+            // up top builds the tower, whoever is down the shaft builds the
+            // hall, and nobody is ever ordered to make the climb.
+            bool got = false;
             int bestDist = int.MaxValue;
-            int bestIndex = -1;
 
-            for (int i = 0; i < _current.Pending.Count; i++)
+            got |= NearestJob(_current, fromX, fromY, ref bestDist, ref taken);
+            got |= NearestJob(_tower, fromX, fromY, ref bestDist, ref taken);
+
+            return got;
+        }
+    }
+
+    /// <summary>
+    /// The closest outstanding job on one project, if it beats what we have
+    /// and is within arm's reach. Nothing is reserved and nothing is removed:
+    /// duplicated effort is harmless and self correcting, whereas reservation
+    /// was the thing that kept jamming.
+    /// </summary>
+    private static bool NearestJob(Building proj, int fromX, int fromY,
+                                   ref int bestDist, ref BuildJob taken)
+    {
+        if (proj == null || proj.Pending.Count == 0)
+            return false;
+
+        int bestIndex = -1;
+
+        for (int i = 0; i < proj.Pending.Count; i++)
+        {
+            BuildJob j = proj.Pending[i];
+
+            int dx = j.X - fromX;
+            int dy = j.Y - fromY;
+            int d = dx * dx + dy * dy;
+
+            if (d < bestDist)
             {
-                BuildJob j = _current.Pending[i];
+                bestDist = d;
+                bestIndex = i;
+            }
+        }
 
-                int dx = j.X - fromX;
-                int dy = j.Y - fromY;
-                int d = dx * dx + dy * dy;
+        // Out of arm's reach: the mason should walk to a site first.
+        if (bestIndex < 0 || bestDist > 70 * 70)
+            return false;
 
-                if (d < bestDist)
+        taken = proj.Pending[bestIndex];
+        return true;
+    }
+
+    /// <summary>
+    /// Which site this mason should walk to: whichever of the two projects is
+    /// nearer. Returns false when there is nothing to walk to at all.
+    /// </summary>
+    public bool NearestSite(int fromX, int fromY, out int sx, out int sy)
+    {
+        sx = sy = 0;
+
+        lock (_lock)
+        {
+            long bestD = long.MaxValue;
+
+            if (SiteX != 0)
+            {
+                long dx = SiteX - fromX, dy = SiteY - fromY;
+                bestD = dx * dx + dy * dy;
+                sx = SiteX;
+                sy = SiteY;
+            }
+
+            if (TowerX != 0)
+            {
+                long dx = TowerX - fromX, dy = TowerY - fromY;
+                long d = dx * dx + dy * dy;
+
+                if (d < bestD)
                 {
-                    bestDist = d;
-                    bestIndex = i;
+                    bestD = d;
+                    sx = TowerX;
+                    sy = TowerY;
                 }
             }
 
-            // Out of arm's reach: the mason should walk to the site first.
-            if (bestIndex < 0 || bestDist > 70 * 70)
-                return false;
-
-            taken = _current.Pending[bestIndex];
-            return true;
+            return sx != 0;
         }
     }
 
@@ -900,58 +1013,76 @@ public sealed class Tribe
     /// Find somewhere to put the next building: near the capital, on ground
     /// that is level enough to stand on, clear of anything already standing.
     /// </summary>
-    private Building ChooseSiteLocked(SimContext ctx, int fromX, int fromY)
+    /// <summary>
+    /// A hall around a cache out at the dig front, which is where the tribe
+    /// actually lives. Returns null when nothing is queued: the surface crew
+    /// carries on regardless, which is the point of running the two apart.
+    /// </summary>
+    private Building ChooseHallLocked(SimContext ctx)
+    {
+        if (Settlements.Count == 0 || _siteQueue.Count == 0)
+            return null;
+
+        var want = _siteQueue.Dequeue();
+
+        var hall = new Building
+        {
+            X = want.X - Building.Width / 2,
+            GroundY = want.Y,
+            Storeys = want.Underground ? 2 + ctx.Rand.Next(3) : 3 + ctx.Rand.Next(5),
+            Underground = want.Underground,
+        };
+
+        foreach (Building other in _built)
+            if (hall.Overlaps(other))
+                return null;
+
+        return hall;
+    }
+
+    /// <summary>
+    /// The next tower in the skyline, placed against the last one.
+    ///
+    /// Towers used to be dropped anywhere within sixty tiles of the
+    /// settlement, so nothing ever stood next to anything else and the surface
+    /// never accumulated into anything you could point at. Stepping out one
+    /// building width at a time, alternating left and right, grows a city out
+    /// from the capital instead of a scatter of sheds.
+    /// </summary>
+    private Building ChooseTowerLocked(SimContext ctx)
     {
         if (Settlements.Count == 0)
             return null;
 
-        // Halls used to win outright, and that is the whole reason this world
-        // only ever grew downward.
+        Settlement site = Settlements[0];
+
+        // A tower starts at the settlement's altitude, full stop.
         //
-        // Cache requests come off the dig front continuously, so the queue was
-        // never empty, so the surface tower branch below this was effectively
-        // dead code. Every site any tribe chose was an underground hall. The
-        // few towers that did get sited were then abandoned silently, because
-        // masons deep in the mines could not climb to them.
-        //
-        // Halls still get priority, because that is where the tribe lives, but
-        // not every time. One building in three is raised on the surface, so
-        // the skyline grows alongside the warren.
-        _sitesChosen++;
+        // SurfaceY scans down for the first genuinely solid ground, and these
+        // tribes have quarried the real surface into swiss cheese, so it kept
+        // reporting "surface" hundreds of tiles below the capital: Ashfang's
+        // tower was sited at y=1210 with its capital at y=448, and Stonewake's
+        // at 1173. They were dutifully building skyscrapers underground, which
+        // is exactly the thing the map said was happening. Anything below this
+        // line is a cellar however tall it is, so it is refused.
+        int floorLimit = site.Y + 30;
 
-        if (_siteQueue.Count > 0 && _sitesChosen % 3 != 0)
+        for (int attempt = 0; attempt < 64; attempt++)
         {
-            var want = _siteQueue.Dequeue();
+            int step = (attempt + 1) / 2;
+            int dir = (attempt % 2 == 0) ? 1 : -1;
+            int x = site.X + dir * step * (Building.Width + 1) - Building.Width / 2;
 
-            var hall = new Building
-            {
-                X = want.X - Building.Width / 2,
-                GroundY = want.Y,
-                Storeys = want.Underground ? 2 + ctx.Rand.Next(3) : 3 + ctx.Rand.Next(5),
-                Underground = want.Underground,
-            };
+            int ground = LevelGround(ctx, x, Building.Width);
 
-            bool taken = false;
-            foreach (Building other in _built)
-                if (hall.Overlaps(other))
-                {
-                    taken = true;
-                    break;
-                }
+            if (ground < 0)
+                ground = SurfaceY(ctx, x + Building.Width / 2);
 
-            if (!taken)
-                return hall;
-        }
-
-        Settlement site = Nearest(fromX, fromY) ?? Settlements[0];
-
-        for (int attempt = 0; attempt < 24; attempt++)
-        {
-            int x = site.X - 60 + ctx.Rand.Next(120);
-
-            int ground = attempt < 18
-                ? LevelGround(ctx, x, Building.Width)
-                : SurfaceY(ctx, x + Building.Width / 2);
+            // Too deep to be a tower. Stand it on the settlement's own level
+            // instead and let phase 1 lay its own floor: they have hundreds of
+            // thousands of blocks in the bank and can afford a foundation.
+            if (ground < 0 || ground > floorLimit)
+                ground = site.Y;
 
             if (ground < 0)
                 continue;
@@ -996,7 +1127,7 @@ public sealed class Tribe
     /// </summary>
     private int TowerStoreysLocked(SimContext ctx, int ground)
     {
-        int earned = 3 + Rooms / 4 + ctx.Rand.Next(6);
+        int earned = 6 + Rooms / 2 + ctx.Rand.Next(6);
 
         if (earned > 400)
             earned = 400;
@@ -1136,6 +1267,30 @@ public sealed class Tribe
                     }
 
                     inherited = parent.Genes.Breed(ctx.Rand);
+                }
+
+                // Keep a floor under the capital, or they are born into a hole.
+                //
+                // This is why nothing was ever built above ground, and it is
+                // not a decision any villager made. The tribes quarried the
+                // ground out from under their own settlements, so a newborn
+                // appeared a tile and a half over an open shaft and fell to
+                // the bottom of the world. A census found sky=0 for all ten
+                // tribes: out of five and a half thousand villagers not one
+                // was near the surface, and the masons sat 1,800 tiles below
+                // their own capital. A tower cannot be staffed by people who
+                // are physically incapable of being there.
+                //
+                // A platform costs nothing from the stores and is relaid the
+                // moment it is dug away again, so the capital keeps its floor
+                // for as long as the tribe keeps having children.
+                if (ctx.CanQueue)
+                {
+                    int floorY = home.Y + 1;
+
+                    for (int fx = home.X - 5; fx <= home.X + 5; fx++)
+                        if (ctx.Snapshot.IsOpen(fx, floorY))
+                            ctx.Queue(TileOp.Platform(fx, floorY, TileID.Platforms, Id));
                 }
 
                 var child = new Villager
@@ -1414,26 +1569,134 @@ public sealed class Tribe
             else if (v.Role == VillagerRole.Soldier) soldiers++;
         }
 
-        foreach (Villager v in Villagers)
-        {
-            if (masons < wantMason && v.Role == VillagerRole.Miner)
+        // Promote by depth, not by list order.
+        //
+        // This walked the list in whatever order villagers happened to sit in,
+        // so a digger two thousand tiles down could be made a mason and then
+        // expected to work a tower on the surface. Climbing is the one thing
+        // they are bad at, so that villager was simply lost, and the deeper
+        // the tribe dug the more of its masons were stranded underground.
+        //
+        // Whoever is already near the sky builds; whoever is deep keeps
+        // digging. The crews then sort themselves out and nobody is ever
+        // ordered to make the climb. Hauling is chest anchored and build stock
+        // is one tribe wide pool, so a mason on the roof spends stone a miner
+        // deposited a thousand tiles below without anyone carrying it up.
+        int surface = Settlements.Count > 0 ? Settlements[0].Y : HomeY;
+        int nearSky = surface + 60;
+        int deep = surface + 200;
+
+        // Two passes: the ones in the right place first, then anyone at all if
+        // the tribe is still short. A tribe entirely underground must still be
+        // able to appoint masons, or it would never build its way back out.
+        for (int pass = 0; pass < 2 && masons < wantMason; pass++)
+            foreach (Villager v in Villagers)
             {
+                if (masons >= wantMason)
+                    break;
+
+                if (v.Role != VillagerRole.Miner)
+                    continue;
+
+                if (pass == 0 && v.TileY > nearSky)
+                    continue;
+
                 v.Role = VillagerRole.Mason;
                 masons++;
             }
-            else if (soldiers < wantSoldier && v.Role == VillagerRole.Miner)
+
+        foreach (Villager v in Villagers)
+        {
+            if (soldiers < wantSoldier && v.Role == VillagerRole.Miner)
             {
                 v.Role = VillagerRole.Soldier;
                 v.MaxHealth = 110;
                 v.Health = 110;
                 soldiers++;
             }
-            else if (masons > wantMason && v.Role == VillagerRole.Mason)
+        }
+
+        // Shed the deepest masons first: they are the ones furthest from any
+        // scaffold and the least use as builders.
+        for (int pass = 0; pass < 2 && masons > wantMason; pass++)
+            foreach (Villager v in Villagers)
             {
+                if (masons <= wantMason)
+                    break;
+
+                if (v.Role != VillagerRole.Mason)
+                    continue;
+
+                if (pass == 0 && v.TileY < deep)
+                    continue;
+
                 v.Role = VillagerRole.Miner;
                 masons--;
             }
+
+        // Trade places: a stranded mason for a miner who is already up top.
+        //
+        // The quota loops above only fire when the tribe is over or under its
+        // mason count. Every tribe sat exactly at quota, filled entirely by
+        // masons stranded at the bottom of the warren from before the crews
+        // were split, so nothing ever changed and the surface crew was never
+        // formed at all. Towers were sited, phases advanced on the stall net
+        // alone, and not one block went in: 0 to 26 built tiles at any capital
+        // while those same tribes laid thousands underground.
+        //
+        // Swapping is what actually staffs the sky. It is capped per tick so
+        // the workforce drifts into place rather than thrashing, and it costs
+        // nothing when there is nobody in the wrong place.
+        if (TowerX != 0)
+        {
+            int swaps = 0;
+            int scan = 0;
+
+            foreach (Villager m in Villagers)
+            {
+                if (swaps >= 8)
+                    break;
+
+                if (m.Role != VillagerRole.Mason || m.TileY < deep)
+                    continue;
+
+                for (; scan < Villagers.Count; scan++)
+                {
+                    Villager up = Villagers[scan];
+
+                    if (up.Role != VillagerRole.Miner || up.TileY > nearSky)
+                        continue;
+
+                    m.Role = VillagerRole.Miner;
+                    up.Role = VillagerRole.Mason;
+                    swaps++;
+                    scan++;
+                    break;
+                }
+            }
         }
+
+        int sky = 0, skyMason = 0, masonDepth = 0, masonCount = 0;
+
+        foreach (Villager v in Villagers)
+        {
+            if (v.TileY <= nearSky)
+            {
+                sky++;
+                if (v.Role == VillagerRole.Mason)
+                    skyMason++;
+            }
+
+            if (v.Role == VillagerRole.Mason)
+            {
+                masonDepth += v.TileY;
+                masonCount++;
+            }
+        }
+
+        SkyFolk = sky;
+        SkyMasons = skyMason;
+        MasonMedianDepth = masonCount > 0 ? masonDepth / masonCount : 0;
 
         Masons = masons;
         Soldiers = soldiers;

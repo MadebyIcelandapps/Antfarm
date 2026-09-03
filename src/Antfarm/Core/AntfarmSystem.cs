@@ -378,6 +378,7 @@ public class AntfarmSystem : ModSystem
 
         ApplyOps();
         SweepLitter();
+        KeepCapitalGround();
         FlushStockpiles();
         Raids();
         Defend();
@@ -815,7 +816,8 @@ public class AntfarmSystem : ModSystem
                 $"  {t.Name,-12} pop={t.Villagers.Count}/{t.PopulationCap} towns={t.Settlements.Count} " +
                 $"rooms={t.Rooms} idle={idle} out={outbound} ret={returning} build={building} " +
                 $"stock={t.BuildStockCount} built={t.BuiltTiles} stairs={t.StairsBuilt} " +
-                $"done={t.BuildingsFinished} gaveup={t.BuildingsAbandoned} disarmed={t.HazardsDisarmed} lost={t.Losses} " +
+                $"done={t.BuildingsFinished} gaveup={t.BuildingsAbandoned} " +
+                $"sky={t.SkyFolk} skymason={t.SkyMasons} masonY={t.MasonMedianDepth} capY={(t.Settlements.Count > 0 ? t.Settlements[0].Y : 0)} " +
                 $"mined={t.TilesMined} unmapped={t.UnmappedMined} hauling={t.HaulingCount} " +
                 $"deliveries={t.Deliveries} stored={t.ItemsStored} chests={t.Chests.Count}");
         }
@@ -1011,6 +1013,67 @@ public class AntfarmSystem : ModSystem
         // them on the floor, and with the cap no longer under pressure they
         // would have sat there for the life of the world.
         itemType == ItemID.Chest;
+
+    private uint _groundTick;
+
+    /// <summary>
+    /// Keep solid ground under every capital, and make it unmineable.
+    ///
+    /// This is why nothing was ever built above ground, and it was never a
+    /// decision any villager made. The tribes quarried the ground out from
+    /// under their own settlements, so a newborn appeared over an open shaft
+    /// and fell to the bottom of the world. A census found sky=0 for all ten
+    /// tribes: of five and a half thousand villagers not one was near the
+    /// surface, and every mason sat about 1,800 tiles below its own capital.
+    /// A tower cannot be staffed by people who are physically unable to be
+    /// there, so the towers were sited, walked through their phases on the
+    /// stall net, and never received a single block.
+    ///
+    /// The slab goes in directly rather than through the op queue, because
+    /// that queue is saturated by digging every single tick and CanQueue is
+    /// therefore false almost always: the first attempt at this laid a floor
+    /// through Queue and not one tile of it was ever placed. It is bounded
+    /// work, ten tribes by eighty one tiles by four rows, and it is marked in
+    /// BuiltMask so the tribes route around it like any of their own masonry.
+    /// </summary>
+    private void KeepCapitalGround()
+    {
+        if (Main.GameUpdateCount - _groundTick < 900)
+            return;
+
+        _groundTick = Main.GameUpdateCount;
+
+        foreach (Tribe tribe in Tribes)
+        {
+            if (tribe.Settlements.Count == 0)
+                continue;
+
+            int cx = tribe.Settlements[0].X;
+            int cy = tribe.Settlements[0].Y;
+
+            for (int x = cx - 40; x <= cx + 40; x++)
+            {
+                if (x < 1 || x >= Main.maxTilesX - 1)
+                    continue;
+
+                for (int y = cy + 1; y <= cy + 4; y++)
+                {
+                    if (y < 1 || y >= Main.maxTilesY - 1)
+                        continue;
+
+                    if (!Main.tile[x, y].HasTile)
+                    {
+                        WorldGen.PlaceTile(x, y, TileID.GrayBrick, true, false, -1);
+                        Snapshot.Set(x, y, Main.tile[x, y].HasTile);
+                        NetMessage.SendTileSquare(-1, x, y, 1);
+                    }
+
+                    // Theirs now, so nobody digs the plaza out again.
+                    BuiltMask.Set(x, y, tribe.Id);
+                }
+            }
+        }
+    }
 
     private void ApplyOps()
     {

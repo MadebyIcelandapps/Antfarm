@@ -253,10 +253,10 @@ public sealed class Villager
             // could never reach, timed out, handed it back and took it again,
             // for ever. Travel is its own act: walk to the building first, then
             // become eligible for jobs on it.
-            if (tribe.SiteX != 0 && !NearSite(tribe))
+            if (tribe.NearestSite(TileX, TileY, out int sx, out int sy) && !NearSite(tribe))
             {
-                TargetX = tribe.SiteX;
-                TargetY = tribe.SiteY;
+                TargetX = sx;
+                TargetY = sy;
                 BuildItem = TravelMarker;
                 BuildWanted = BuildKind.Clear;
                 Task = VillagerTask.Building;
@@ -426,10 +426,21 @@ public sealed class Villager
     public const int TravelMarker = -1;
 
     /// <summary>Close enough to the site to be given work on it.</summary>
-    private bool NearSite(Tribe tribe)
+    /// <summary>
+    /// Standing at either of the tribe's two building sites. Checking both is
+    /// what keeps the sky crew on the surface: a mason next to the tower is at
+    /// work, not "far from the hall" and therefore ordered underground.
+    /// </summary>
+    private bool NearSite(Tribe tribe) =>
+        AtSite(tribe.SiteX, tribe.SiteY) || AtSite(tribe.TowerX, tribe.TowerY);
+
+    private bool AtSite(int sx, int sy)
     {
-        int dx = tribe.SiteX - TileX;
-        int dy = tribe.SiteY - TileY;
+        if (sx == 0)
+            return false;
+
+        int dx = sx - TileX;
+        int dy = sy - TileY;
         return dx > -45 && dx < 45 && dy > -25 && dy < 25;
     }
 

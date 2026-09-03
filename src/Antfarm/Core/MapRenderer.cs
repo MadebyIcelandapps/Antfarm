@@ -20,7 +20,10 @@ public static class MapRenderer
     /// <summary>Roughly how many pixels wide a rendered region should come out.</summary>
     public const int TargetWidth = 1100;
 
-    public static byte[] Build(TileSnapshot snap, MinedMask mask,
+    /// <summary>Where the built-tile colours start, one per tribe.</summary>
+    public const int BuiltBase = 12;
+
+    public static byte[] Build(TileSnapshot snap, MinedMask mask, MinedMask built,
                                int regionX, int regionY, int regionW, int regionH)
     {
         int worldW = snap.Width;
@@ -80,6 +83,16 @@ public static class MapRenderer
                 int open = 0, solid = 0;
                 int bestTribe = -1, bestCount = 0;
 
+                // Masonry beats excavation for the cell's colour.
+                //
+                // The map drew MinedMask alone, which is what a tribe has DUG.
+                // A tower is placed, not dug, so a hundred storey tower left
+                // no mark whatsoever and the map showed ten colonies growing
+                // only downward and sideways. That was the map's blind spot,
+                // not the tribes': the one thing this panel exists to show was
+                // the one thing it could not draw.
+                int bestBuilt = -1;
+
                 // Bound the work on big blocks: sampling every other tile is
                 // plenty to find a majority and keeps a full world redraw cheap.
                 int stride = step > 4 ? 2 : 1;
@@ -90,6 +103,13 @@ public static class MapRenderer
                     {
                         int x = x0 + dx;
                         int y = y0 + dy;
+
+                        if (built != null)
+                        {
+                            byte bm = built.Get(x, y);
+                            if (bm != 0)
+                                bestBuilt = bm - 1;
+                        }
 
                         byte m = mask.Get(x, y);
 
@@ -140,7 +160,8 @@ public static class MapRenderer
                 // coastline flickering. The zoom label tells you the scale, and
                 // zooming in shows the true width.
                 buf[rowBase + vx] =
-                    bestTribe >= 0 ? (byte)(2 + bestTribe)
+                    bestBuilt >= 0 ? (byte)(BuiltBase + bestBuilt)
+                    : bestTribe >= 0 ? (byte)(2 + bestTribe)
                     : open >= solid ? (byte)0
                     : (byte)1;
 

@@ -157,7 +157,7 @@ public sealed class Timelapse
         if (_system.Snapshot.Width <= 0)
             return;
 
-        byte[] raw = MapRenderer.Build(_system.Snapshot, _system.Mask, 0, 0, 0, 0);
+        byte[] raw = MapRenderer.Build(_system.Snapshot, _system.Mask, _system.BuiltMask, 0, 0, 0, 0);
 
         byte[] packed;
         using (var ms = new MemoryStream())
