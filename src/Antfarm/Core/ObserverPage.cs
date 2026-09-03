@@ -358,6 +358,10 @@ internal static class ObserverPage
           if (mined === lastMined) stalls++; else stalls = 0;
           lastMined = mined;
 
+          // While scrubbing, the historical numbers own the display.
+          if (replaying)
+            return;
+
           document.getElementById('totals').innerHTML =
             '<b>' + mined.toLocaleString() + '</b> tiles dug &nbsp;·&nbsp; ' +
             '<b>' + stored.toLocaleString() + '</b> items stockpiled &nbsp;·&nbsp; ' +
@@ -418,6 +422,38 @@ internal static class ObserverPage
             const buf = await (await fetch('/timelapse/frame?i=' + i)).arrayBuffer();
             if (loadFrame(buf)) paint();
           } catch (e) { /* skip a bad frame rather than stopping playback */ }
+
+          // Show the numbers that were true when this frame was taken. The
+          // archive used to record only the map, so scrubbing back a week
+          // displayed last week's tunnels with today's population under them.
+          try {
+            const r = await fetch('/timelapse/stats?i=' + i);
+            if (!r.ok) return;
+
+            const h = await r.json();
+            if (!h.pop && !h.mined) return;
+
+            const when = h.t ? new Date(h.t * 1000).toLocaleString() : 'unknown time';
+
+            document.getElementById('totals').innerHTML =
+              '<b>' + (h.mined || 0).toLocaleString() + '</b> tiles dug &nbsp;·&nbsp; ' +
+              '<b>' + (h.stored || 0).toLocaleString() + '</b> stockpiled &nbsp;·&nbsp; ' +
+              '<b>' + (h.built || 0).toLocaleString() + '</b> blocks built &nbsp;·&nbsp; ' +
+              '<b>' + (h.pop || 0) + '</b> villagers &nbsp;·&nbsp; ' +
+              (h.kills || 0) + ' kills, ' + (h.lost || 0) + ' lost' +
+              ' &nbsp;·&nbsp; <span class="k-strike">history: ' + when + '</span>';
+
+            if (h.tribes && h.tribes.length) {
+              for (const rec of h.tribes) {
+                for (const [, row] of rows) {
+                  if (row.cells[0].textContent.indexOf(rec.n) < 0) continue;
+                  row.cells[2].textContent = rec.p;
+                  row.cells[6].textContent = rec.m;
+                  row.cells[10].textContent = rec.b;
+                }
+              }
+            }
+          } catch (e) { /* leave the live numbers up */ }
         }
 
         function setLive() {

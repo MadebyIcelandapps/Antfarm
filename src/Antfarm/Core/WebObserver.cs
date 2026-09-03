@@ -262,6 +262,15 @@ public sealed class WebObserver
                 Send(stream, 200, "application/json; charset=utf-8", Encoding.UTF8.GetBytes(BuildTimelapseInfo()), gzip);
                 break;
 
+            case "/timelapse/stats":
+            {
+                string recorded = _system.Recorder?.StatsFor(ParseInt(Query(query, "i"), -1));
+
+                Send(stream, recorded == null ? 404 : 200, "application/json; charset=utf-8",
+                     Encoding.UTF8.GetBytes(recorded ?? "{}"), gzip);
+                break;
+            }
+
             case "/timelapse/frame":
             {
                 Timelapse tl = _system.Recorder;

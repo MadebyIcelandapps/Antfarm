@@ -29,6 +29,16 @@ public sealed class Timelapse
 {
     private readonly AntfarmSystem _system;
     private readonly string _path;
+
+    /// <summary>
+    /// One line of statistics per frame, so scrubbing shows the numbers that
+    /// were true then.
+    ///
+    /// The archive recorded only the map, so replaying last week's tunnels
+    /// displayed this week's population underneath them. Half of the history
+    /// was fiction.
+    /// </summary>
+    private string StatsPath => _path + ".stats";
     private readonly int _intervalSeconds;
 
     private readonly List<(long Offset, int Length, long Time)> _index = new();
@@ -157,8 +167,12 @@ public sealed class Timelapse
             packed = ms.ToArray();
         }
 
+        string stats = SnapshotStats();
+
         lock (_lock)
         {
+            File.AppendAllText(StatsPath, stats + Environment.NewLine);
+
             using var fs = new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.Read);
             using var bw = new BinaryWriter(fs);
 
@@ -209,6 +223,61 @@ public sealed class Timelapse
         {
             return null;
         }
+    }
+
+    /// <summary>The recorded statistics for a frame, or null if there are none.</summary>
+    public string StatsFor(int i)
+    {
+        try
+        {
+            if (i < 0 || !File.Exists(StatsPath))
+                return null;
+
+            // Frames are appended in order, so line i belongs to frame i.
+            int line = 0;
+            foreach (string text in File.ReadLines(StatsPath))
+            {
+                if (line++ == i)
+                    return text;
+            }
+        }
+        catch { }
+
+        return null;
+    }
+
+    /// <summary>A compact record of how things stood when this frame was taken.</summary>
+    private string SnapshotStats()
+    {
+        var sb = new System.Text.StringBuilder(512);
+        sb.Append("{\"t\":").Append(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+
+        long pop = 0, mined = 0, built = 0, stored = 0, kills = 0, lost = 0;
+        var names = new List<string>();
+
+        lock (_system.Tribes)
+        {
+            foreach (Sim.Tribe t in _system.Tribes)
+            {
+                pop += t.Villagers.Count;
+                mined += t.TilesMined;
+                built += t.BuiltTiles;
+                stored += t.ItemsStored;
+                kills += t.Kills;
+                lost += t.Losses;
+                names.Add($"{{\"n\":\"{t.Name}\",\"p\":{t.Villagers.Count},\"m\":{t.TilesMined},\"b\":{t.BuiltTiles}}}");
+            }
+        }
+
+        sb.Append(",\"pop\":").Append(pop)
+          .Append(",\"mined\":").Append(mined)
+          .Append(",\"built\":").Append(built)
+          .Append(",\"stored\":").Append(stored)
+          .Append(",\"kills\":").Append(kills)
+          .Append(",\"lost\":").Append(lost)
+          .Append(",\"tribes\":[").Append(string.Join(",", names)).Append("]}");
+
+        return sb.ToString();
     }
 
     public long TimeOf(int i)

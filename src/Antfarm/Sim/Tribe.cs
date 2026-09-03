@@ -256,6 +256,33 @@ public sealed class Tribe
         get { lock (_lock) { int n = 0; foreach (int v in _hauling.Values) n += v; return n; } }
     }
 
+    /// <summary>
+    /// The material economy, for saving. Build stock, ore awaiting the furnace
+    /// and carried loads all live only in memory otherwise, so every restart
+    /// wipes a tribe back to nothing and it reports "no materials" until it has
+    /// mined its way back. Across many restarts it can never accumulate at all.
+    /// </summary>
+    public void ExportStock(List<int> types, List<int> counts, List<int> oreTypes, List<int> oreCounts)
+    {
+        lock (_lock)
+        {
+            foreach (var kv in _buildStock) { types.Add(kv.Key); counts.Add(kv.Value); }
+            foreach (var kv in _smeltQueue) { oreTypes.Add(kv.Key); oreCounts.Add(kv.Value); }
+        }
+    }
+
+    public void ImportStock(IList<int> types, IList<int> counts, IList<int> oreTypes, IList<int> oreCounts)
+    {
+        lock (_lock)
+        {
+            for (int i = 0; i < types.Count && i < counts.Count; i++)
+                _buildStock[types[i]] = counts[i];
+
+            for (int i = 0; i < oreTypes.Count && i < oreCounts.Count; i++)
+                _smeltQueue[oreTypes[i]] = oreCounts[i];
+        }
+    }
+
     public int BuildStockCount
     {
         get { lock (_lock) { int n = 0; foreach (int v in _buildStock.Values) n += v; return n; } }
@@ -651,6 +678,8 @@ public sealed class Tribe
     private readonly List<Building> _built = new();
 
     public int BuildingsFinished;
+    private int _lastPending = -1;
+    private int _phaseStallTicks;
     public string BuildingStatus { get; private set; } = "idle";
 
     /// <summary>Where the crew should be standing. Zero when there is no site.</summary>
@@ -700,6 +729,24 @@ public sealed class Tribe
             for (int i = _current.Pending.Count - 1; i >= 0; i--)
                 if (!Building.StillNeeded(ctx, _current.Pending[i]))
                     _current.Pending.RemoveAt(i);
+
+            // Safety net: a phase that makes no progress for two minutes is
+            // being blocked by something nobody can do, so move on rather than
+            // stopping the tribe's construction for ever. One indestructible
+            // tile used to freeze a tribe permanently at phase 0.
+            if (_current.Pending.Count != _lastPending)
+            {
+                _lastPending = _current.Pending.Count;
+                _phaseStallTicks = 0;
+            }
+            else if (++_phaseStallTicks > 6)
+            {
+                _phaseStallTicks = 0;
+                _current.Pending.Clear();
+
+                ctx.Events.Add(EventKind.Colony, Id,
+                    $"{Name} gave up on part of a building it could not finish");
+            }
 
             if (_current.Pending.Count == 0)
             {
@@ -944,12 +991,19 @@ public sealed class Tribe
         // grow, so a starving or stalled tribe stops expanding on its own.
         // The dead do not breed. An undead tribe grows only by raising more of
         // its own fallen, which is what makes it unkillable but never larger.
-        if (!Undead && Villagers.Count < PopulationCap && BuildStockCount >= 40)
+        // Breeding takes a surplus, not the last brick in the pile.
+        //
+        // A birth cost 40 build stock and fired every twenty seconds per tribe,
+        // so 131 births consumed roughly 5,240 units, more than double
+        // everything the whole world had ever built. Eight of ten tribes sat at
+        // zero materials reporting they could not build, while quietly spending
+        // it all on children. Construction gets first claim now.
+        if (!Undead && Villagers.Count < PopulationCap && BuildStockCount >= 200)
         {
             lock (_lock)
             {
                 var types = new List<int>(_buildStock.Keys);
-                int need = 40;
+                int need = 25;
                 foreach (int t in types)
                 {
                     if (need <= 0) break;

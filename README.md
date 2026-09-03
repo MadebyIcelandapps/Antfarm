@@ -45,6 +45,16 @@ there is none within 60 tiles the tribe opens a cache where the villager stands.
 Chests propagate along the dig front, so the round trip stays short however deep
 the colony goes, and each cache seeds an underground hall around itself.
 
+**Tribes fight each other.** Villagers of rival tribes that meet underground
+come to blows, and both sides raise a threat at the seam which pulls their
+soldiers in. Their own digging is what brings them into contact.
+
+**Everything persists.** Territory colouring, the material economy, gene pools,
+lifetime records and the roll of the dead all survive a restart. Each of those
+was learned the hard way: anything kept only in memory silently resets the world
+every time the server bounces, and a colony that is restarted often can never
+accumulate anything at all.
+
 ---
 
 ## Requirements
@@ -175,6 +185,7 @@ ingress:
 | `/map.bin?x&y&w&h` | map region, one byte per cell, gzipped |
 | `/timelapse` | frame count and interval |
 | `/timelapse/frame?i=N` | one historical frame |
+| `/timelapse/stats?i=N` | the numbers as they were when that frame was taken |
 
 ---
 
@@ -225,8 +236,8 @@ and dying to a fall while trying to look at a tower is not the game.
 - **Settlements are founded at a point and outposts follow the workforce, but
   the original capital never moves.** Chest anchoring makes this survivable;
   it is not solved.
-- **No building has been observed completing all five construction phases.**
-  Blocks are placed and phases advance; the final fit-out is unproven.
+- **Construction is slow and uneven.** Buildings do complete, but some tribes
+  build far more than others depending on how their material supply is going.
 - Villagers render as coloured rectangles rather than sprites.
 - Tribe-vs-tribe combat is implemented but only fires once two tribes' tunnels
   actually meet, which takes hours.

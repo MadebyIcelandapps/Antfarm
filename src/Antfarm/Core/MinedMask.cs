@@ -1,3 +1,7 @@
+using System;
+using System.IO;
+using System.IO.Compression;
+
 namespace Antfarm.Core;
 
 /// <summary>
@@ -21,6 +25,76 @@ public sealed class MinedMask
 
     public int Width => _width;
     public int Height => _height;
+
+    /// <summary>
+    /// Write the mask beside the world.
+    ///
+    /// It is a byte per tile, 20 MB on a large world, but almost all zeros, so
+    /// it gzips to a fraction of that. Keeping it only in memory meant every
+    /// restart erased which tribe had dug what, the whole map went grey, and it
+    /// re-coloured from scratch over the following hours. With twenty-odd
+    /// restarts in an evening the territory view never looked stable.
+    /// </summary>
+    public void Save(string path)
+    {
+        if (_by == null)
+            return;
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+            using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+            using var bw = new BinaryWriter(fs);
+
+            bw.Write(_width);
+            bw.Write(_height);
+            bw.Flush();
+
+            using var gz = new GZipStream(fs, CompressionLevel.Fastest, true);
+            gz.Write(_by, 0, _by.Length);
+        }
+        catch { /* a lost mask costs colour, never correctness */ }
+    }
+
+    /// <summary>Read it back. Silently does nothing if it is missing or the world changed size.</summary>
+    public bool Load(string path, int width, int height)
+    {
+        try
+        {
+            if (!File.Exists(path))
+                return false;
+
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var br = new BinaryReader(fs);
+
+            if (br.ReadInt32() != width || br.ReadInt32() != height)
+                return false;
+
+            var buf = new byte[(long)width * height];
+
+            using (var gz = new GZipStream(fs, CompressionMode.Decompress))
+            {
+                int read = 0;
+                while (read < buf.Length)
+                {
+                    int n = gz.Read(buf, read, buf.Length - read);
+                    if (n <= 0)
+                        break;
+                    read += n;
+                }
+            }
+
+            _width = width;
+            _height = height;
+            _by = buf;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     public void Rebuild(int width, int height)
     {

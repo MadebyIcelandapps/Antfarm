@@ -105,8 +105,16 @@ public class AntfarmSystem : ModSystem
         }
 
         Snapshot.Rebuild();
-        Mask.Rebuild(Main.maxTilesX, Main.maxTilesY);
-        BuiltMask.Rebuild(Main.maxTilesX, Main.maxTilesY);
+
+        // Territory colouring survives a restart now. Without this the map went
+        // fully grey on every start and slowly re-coloured over hours.
+        if (Mask.Load(MaskPath("mined"), Main.maxTilesX, Main.maxTilesY))
+            Mod.Logger.Info("antfarm: restored the dug-by-tribe map");
+        else
+            Mask.Rebuild(Main.maxTilesX, Main.maxTilesY);
+
+        if (!BuiltMask.Load(MaskPath("built"), Main.maxTilesX, Main.maxTilesY))
+            BuiltMask.Rebuild(Main.maxTilesX, Main.maxTilesY);
 
         // Seed on an empty list rather than a saved flag. If a world somehow
         // comes back with no tribes, the right answer is to repopulate it, not
@@ -129,6 +137,7 @@ public class AntfarmSystem : ModSystem
         if (Tribes.Count == 0)
             SeedTribes();
 
+        RestoreChestPositions();
         SpawnWorkforce();
         StartSim();
 
@@ -241,6 +250,47 @@ public class AntfarmSystem : ModSystem
         }
 
         return (int)Main.worldSurface;
+    }
+
+    /// <summary>
+    /// Rebuild each tribe's chest positions from the world, and mark them as
+    /// masonry.
+    ///
+    /// Chest indices are saved but their coordinates are not, and the colony
+    /// thread cannot read Main.chest. Without this a reloaded world has tribes
+    /// that do not know where their own vaults are, and worse, treat them as
+    /// ordinary rock: halls are planned around caches, so the clearing phase
+    /// tries to mine out a chest, Terraria refuses to break one holding items,
+    /// and construction stops permanently at phase 0.
+    /// </summary>
+    private void RestoreChestPositions()
+    {
+        int restored = 0;
+
+        foreach (Tribe tribe in Tribes)
+        {
+            tribe.ChestSpots.Clear();
+
+            foreach (int index in tribe.Chests)
+            {
+                if (index < 0 || index >= Main.chest.Length)
+                    continue;
+
+                Chest chest = Main.chest[index];
+                if (chest == null)
+                    continue;
+
+                tribe.ChestSpots.Add((chest.x, chest.y + 1));
+                restored++;
+
+                for (int ix = chest.x; ix <= chest.x + 1; ix++)
+                    for (int iy = chest.y; iy <= chest.y + 2; iy++)
+                        BuiltMask.Set(ix, iy, tribe.Id);
+            }
+        }
+
+        if (restored > 0)
+            Mod.Logger.Info($"antfarm: restored {restored} chest positions and marked them as masonry");
     }
 
     private void SpawnWorkforce()
@@ -1100,7 +1150,28 @@ public class AntfarmSystem : ModSystem
         }
 
         index = WorldGen.PlaceChest(x, y, TileID.Containers, false, 0);
-        return index >= 0;
+
+        if (index < 0)
+            return false;
+
+        // Mark the chest and the brick under it as tribe masonry.
+        //
+        // Without this the colony treats its own vault as raw stone. Halls are
+        // planned around caches, so the clearing phase tried to mine the chest
+        // out, and Terraria refuses to break a chest holding items. Every tribe
+        // that reached that point froze at phase 0 with one or two impossible
+        // jobs left, for ever, and never placed a single block. It also stops
+        // miners quarrying away their own stockpile.
+        for (int ix = x; ix <= x + 1; ix++)
+        {
+            for (int iy = y - 1; iy <= y + 1; iy++)
+                BuiltMask.Set(ix, iy, tribe.Id);
+
+            Snapshot.Set(ix, y - 1, true);
+            Snapshot.Set(ix, y, true);
+        }
+
+        return true;
     }
 
     // ------------------------------------------------------------------
@@ -1138,12 +1209,26 @@ public class AntfarmSystem : ModSystem
         return list;
     }
 
+    private static string MaskPath(string kind) =>
+        System.IO.Path.Combine(Main.SavePath, "Antfarm", $"{kind}-{Main.worldID}.bin");
+
     public override void SaveWorldData(TagCompound tag)
     {
+        // Written alongside the world rather than inside it: a byte per tile is
+        // far too much for a TagCompound, but gzips small on disk.
+        Mask.Save(MaskPath("mined"));
+        BuiltMask.Save(MaskPath("built"));
+
         var list = new List<TagCompound>();
 
         foreach (Tribe t in Tribes)
         {
+            var stockTypes = new List<int>();
+            var stockCounts = new List<int>();
+            var oreTypes = new List<int>();
+            var oreCounts = new List<int>();
+            t.ExportStock(stockTypes, stockCounts, oreTypes, oreCounts);
+
             var sx = new List<int>();
             var sy = new List<int>();
             var rooms = new List<int>();
@@ -1179,6 +1264,11 @@ public class AntfarmSystem : ModSystem
                 ["gb"] = t.GeneBoldness,
                 ["gw"] = t.GeneWander,
                 ["births"] = t.Births,
+                ["stockT"] = stockTypes,
+                ["stockN"] = stockCounts,
+                ["oreT"] = oreTypes,
+                ["oreN"] = oreCounts,
+                ["bars"] = t.Bars,
                 ["undead"] = t.Undead,
                 ["dead"] = SaveDead(t),
             });
@@ -1245,6 +1335,13 @@ public class AntfarmSystem : ModSystem
                     // housing count. Housing is derived from blocks placed now.
                     Slot = i < rooms.Count ? rooms[i] : 0,
                 });
+
+            tribe.Bars = t.GetLong("bars");
+
+            if (t.ContainsKey("stockT"))
+                tribe.ImportStock(
+                    t.GetList<int>("stockT"), t.GetList<int>("stockN"),
+                    t.GetList<int>("oreT"), t.GetList<int>("oreN"));
 
             tribe.Chests.AddRange(t.GetList<int>("chests"));
             Tribes.Add(tribe);

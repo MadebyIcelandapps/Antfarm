@@ -50,6 +50,7 @@ public static class MapRenderer
             return new byte[HeaderBytes];
 
         var buf = new byte[HeaderBytes + vw * vh];
+        var tally = new int[32];        // votes per tribe within one cell
         WriteInt(buf, 0, vw);
         WriteInt(buf, 4, vh);
         WriteInt(buf, 8, regionX);
@@ -65,31 +66,70 @@ public static class MapRenderer
             {
                 int x0 = regionX + vx * step;
 
-                int tribe = -1;
-                bool open = false;
+                // Majority, not first-hit.
+                //
+                // The old rule was "if any tile in this block was dug by a
+                // tribe, colour the whole block". At one pixel per 8x8 tiles a
+                // single dug tile painted sixty-four tiles' worth of colour, so
+                // territory looked enormous zoomed out and sparse zoomed in.
+                // Colours appeared and vanished as you zoomed, because the two
+                // scales genuinely disagreed about what was there.
+                //
+                // Counting and taking the majority makes every zoom level agree
+                // with every other, and with the world.
+                int open = 0, solid = 0;
+                int bestTribe = -1, bestCount = 0;
 
-                // Tribe work wins the cell, so a one tile tunnel still shows
-                // after downsampling. That is the whole point of the view.
-                for (int dy = 0; dy < step && tribe < 0; dy++)
+                // Bound the work on big blocks: sampling every other tile is
+                // plenty to find a majority and keeps a full world redraw cheap.
+                int stride = step > 4 ? 2 : 1;
+
+                for (int dy = 0; dy < step; dy += stride)
                 {
-                    for (int dx = 0; dx < step; dx++)
+                    for (int dx = 0; dx < step; dx += stride)
                     {
                         int x = x0 + dx;
                         int y = y0 + dy;
 
                         byte m = mask.Get(x, y);
+
                         if (m != 0)
                         {
-                            tribe = m - 1;
-                            break;
-                        }
+                            int id = m - 1;
+                            int count = ++tally[id & 31];
 
-                        if (!open && snap.IsOpen(x, y))
-                            open = true;
+                            if (count > bestCount)
+                            {
+                                bestCount = count;
+                                bestTribe = id;
+                            }
+                        }
+                        else if (snap.IsOpen(x, y))
+                        {
+                            open++;
+                        }
+                        else
+                        {
+                            solid++;
+                        }
                     }
                 }
 
-                buf[rowBase + vx] = tribe >= 0 ? (byte)(2 + tribe) : (open ? (byte)0 : (byte)1);
+                // Reset only what was touched; clearing 32 entries per cell
+                // would cost more than the sampling itself.
+                if (bestTribe >= 0)
+                    for (int dy = 0; dy < step; dy += stride)
+                        for (int dx = 0; dx < step; dx += stride)
+                        {
+                            byte m = mask.Get(x0 + dx, y0 + dy);
+                            if (m != 0)
+                                tally[(m - 1) & 31] = 0;
+                        }
+
+                buf[rowBase + vx] = bestCount >= open && bestCount >= solid && bestTribe >= 0
+                    ? (byte)(2 + bestTribe)
+                    : (open >= solid ? (byte)0 : (byte)1);
+
             }
         }
 
