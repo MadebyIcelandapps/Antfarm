@@ -742,6 +742,18 @@ public sealed class Tribe
     public string BuildingStatus { get; private set; } = "idle";
 
     /// <summary>Where the crew should be standing. Zero when there is no site.</summary>
+    /// <summary>The surface settlement: the highest one the tribe has.</summary>
+    public bool TrySurfaceSeat(out int sx, out int sy)
+    {
+        lock (_lock)
+        {
+            Settlement st = SurfaceSeat();
+            sx = st?.X ?? 0;
+            sy = st?.Y ?? 0;
+            return st != null;
+        }
+    }
+
     public int SiteX, SiteY;
 
     /// <summary>Where the surface tower is going up, or 0 if there is none.</summary>
@@ -1048,6 +1060,26 @@ public sealed class Tribe
     /// actually lives. Returns null when nothing is queued: the surface crew
     /// carries on regardless, which is the point of running the two apart.
     /// </summary>
+    /// <summary>
+    /// The highest settlement the tribe has, which is the one on the surface.
+    ///
+    /// Everything above ground was anchored to Settlements[0], and that is
+    /// only the capital while a tribe has one settlement. These tribes now
+    /// found eight apiece, most of them deep, so the district quietly
+    /// reanchored itself underground: the tower was being built at y=877 with
+    /// the capital at y=448, and nothing above ground moved.
+    /// </summary>
+    private Settlement SurfaceSeat()
+    {
+        Settlement best = null;
+
+        foreach (Settlement st in Settlements)
+            if (best == null || st.Y < best.Y)
+                best = st;
+
+        return best;
+    }
+
     private Building ChooseHallLocked(SimContext ctx)
     {
         if (Settlements.Count == 0 || _siteQueue.Count == 0)
@@ -1095,10 +1127,10 @@ public sealed class Tribe
     /// </summary>
     private Building ChooseTowerLocked(SimContext ctx)
     {
-        if (Settlements.Count == 0)
-            return null;
+        Settlement site = SurfaceSeat();
 
-        Settlement site = Settlements[0];
+        if (site == null)
+            return null;
 
         // The district widens as the tribe earns it, so a young colony builds a
         // house and an old one builds a quarter.
@@ -1629,7 +1661,8 @@ public sealed class Tribe
         // ordered to make the climb. Hauling is chest anchored and build stock
         // is one tribe wide pool, so a mason on the roof spends stone a miner
         // deposited a thousand tiles below without anyone carrying it up.
-        int surface = Settlements.Count > 0 ? Settlements[0].Y : HomeY;
+        Settlement seat = SurfaceSeat();
+        int surface = seat != null ? seat.Y : HomeY;
         int nearSky = surface + 60;
         int deep = surface + 200;
 

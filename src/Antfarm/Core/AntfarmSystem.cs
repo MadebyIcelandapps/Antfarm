@@ -818,7 +818,7 @@ public class AntfarmSystem : ModSystem
                 $"rooms={t.Rooms} idle={idle} out={outbound} ret={returning} build={building} " +
                 $"stock={t.BuildStockCount} built={t.BuiltTiles} stairs={t.StairsBuilt} " +
                 $"done={t.BuildingsFinished} gaveup={t.BuildingsAbandoned} " +
-                $"sky={t.SkyFolk} skymason={t.SkyMasons} masonY={t.MasonMedianDepth} capY={(t.Settlements.Count > 0 ? t.Settlements[0].Y : 0)} " +
+                $"sky={t.SkyFolk} skymason={t.SkyMasons} masonY={t.MasonMedianDepth} " +
                 $"mined={t.TilesMined} unmapped={t.UnmappedMined} hauling={t.HaulingCount} " +
                 $"deliveries={t.Deliveries} stored={t.ItemsStored} chests={t.Chests.Count}");
         }
@@ -1077,11 +1077,8 @@ public class AntfarmSystem : ModSystem
 
         foreach (Tribe tribe in Tribes)
         {
-            if (tribe.Settlements.Count == 0)
+            if (!tribe.TrySurfaceSeat(out int cx, out int cy))
                 continue;
-
-            int cx = tribe.Settlements[0].X;
-            int cy = tribe.Settlements[0].Y;
 
             for (int x = cx - 40; x <= cx + 40; x++)
             {
