@@ -1,4 +1,4 @@
 displayName = Antfarm
-author = Helgi
+author = MadebyIcelandapps
 version = 0.1.0
 side = Both

@@ -308,9 +308,17 @@ public sealed class Tribe
     /// compounded. Excavation therefore also counts: carving living space out
     /// of solid rock houses people too, and it gives every tribe a floor to
     /// climb from.
+    ///
+    /// The excavation term was worth at most 60, which was far too small next
+    /// to six per room, and that turned the whole thing into a poverty trap.
+    /// Growth needed rooms, rooms needed stock, stock needed miners, and miners
+    /// needed growth. Nine of ten tribes sat at exactly their cap (43/43, 42/42)
+    /// and could never take the first step, while the one tribe that broke out
+    /// early compounded away from everyone: 438 villagers against 44, and
+    /// fourteen times the tonnage. Mining alone now has to be a real path up.
     /// </summary>
     public int PopulationCap =>
-        40 + Rooms * 6 + (int)(TilesMined / 400 < 60 ? TilesMined / 400 : 60);
+        40 + Rooms * 6 + (int)(TilesMined / 50 < 500 ? TilesMined / 50 : 500);
 
     public void CountTasks(out int idle, out int outbound, out int returning, out int building)
     {
@@ -462,6 +470,20 @@ public sealed class Tribe
             // drifted steadily away from home and ended up spending their whole
             // lives hauling: nearly every worker sat in the returning state and
             // mining ground down to a trickle.
+            // Local work must stay within reach of storage.
+            //
+            // Picking each new face near wherever you stand is a random walk
+            // with no limit, and over hours it carries a tribe clean off the
+            // map: Ashfang's villagers ended up 6,084 tiles from their nearest
+            // chest, inside another tribe's territory, unable to deliver
+            // anything ever again. Bounding to the settlement was the original
+            // mistake, because settlements never move. Bounding to the nearest
+            // chest works because storage follows the dig front: push past it
+            // and a hauler opens a cache, which extends the boundary.
+            if (local && ChestSpots.Count > 0 &&
+                NearestChest(x, y, out _, out _, out int toStore) && toStore > 150)
+                continue;
+
             // Only the settlement-centred fallback is bounded by territory.
             //
             // Applying it to local targets too was fatal: a villager 415 tiles
@@ -991,29 +1013,23 @@ public sealed class Tribe
         // grow, so a starving or stalled tribe stops expanding on its own.
         // The dead do not breed. An undead tribe grows only by raising more of
         // its own fallen, which is what makes it unkillable but never larger.
-        // Breeding takes a surplus, not the last brick in the pile.
+        // Births do not compete with builders for materials.
         //
-        // A birth cost 40 build stock and fired every twenty seconds per tribe,
-        // so 131 births consumed roughly 5,240 units, more than double
-        // everything the whole world had ever built. Eight of ten tribes sat at
-        // zero materials reporting they could not build, while quietly spending
-        // it all on children. Construction gets first claim now.
-        if (!Undead && Villagers.Count < PopulationCap && BuildStockCount >= 200)
+        // They used to: a birth needed 60 stock and spent 20. That put a
+        // hard ceiling on the pile at 60, because every time a tribe crept
+        // over the line a child ate the difference. Buildings need more than
+        // that to start, so eight of ten tribes were pinned in a 0-60 band
+        // for good, mining thousands of tiles and never laying a block.
+        // Duskloam escaped only because its income dwarfed the drain, and it
+        // then looked like the one tribe with a work ethic.
+        //
+        // Tuning the two numbers cannot fix this; any gate above any cost
+        // recreates the same band. So the pools are separate now. Population
+        // is limited by PopulationCap, which is rooms and excavation and is
+        // already paid for in real digging. Materials limit building. Neither
+        // can starve the other.
+        if (!Undead && Villagers.Count < PopulationCap)
         {
-            lock (_lock)
-            {
-                var types = new List<int>(_buildStock.Keys);
-                int need = 25;
-                foreach (int t in types)
-                {
-                    if (need <= 0) break;
-                    int take = _buildStock[t] < need ? _buildStock[t] : need;
-                    _buildStock[t] -= take;
-                    if (_buildStock[t] <= 0) _buildStock.Remove(t);
-                    need -= take;
-                }
-            }
-
             Settlement home = Settlements.Count > 0 ? Settlements[0] : null;
             if (home != null)
             {
