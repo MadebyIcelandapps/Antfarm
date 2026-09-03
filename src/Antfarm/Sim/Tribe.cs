@@ -878,7 +878,7 @@ public sealed class Tribe
             lastPending = proj.Pending.Count;
             stallTicks = 0;
         }
-        else if (++stallTicks > 6)
+        else if (++stallTicks > (proj.District ? 3 : 6))
         {
             stallTicks = 0;
             proj.Pending.Clear();
@@ -912,6 +912,23 @@ public sealed class Tribe
         {
             if (proj.Phase >= Building.LastPhase)
             {
+                // A room with a shell counts, even if a few tiles of trim were
+                // never placeable. Holding out for the last job is what kept
+                // the district stuck on its first cell with a finished room
+                // standing in it.
+                if (proj.District && proj.BlocksLaid > 0)
+                {
+                    _rooms.Add((proj.Col, proj.Row));
+                    _built.Add(proj);
+                    BuildingsFinished++;
+
+                    if (_built.Count > 64)
+                        _built.RemoveRange(0, 32);
+
+                    proj = null;
+                    return;
+                }
+
                 // Storey finished. Start the next one rather than the whole
                 // building's next phase: what stands is always complete, and
                 // the tower visibly grows instead of standing as a full height

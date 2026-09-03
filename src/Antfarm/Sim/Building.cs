@@ -174,7 +174,13 @@ public sealed class Building
                 // on the map and does not hold anything up. On a cottage it is
                 // cheap and makes the inside read as indoors; on a monument it
                 // is the difference between topping out and never finishing.
-                if (Width <= 40)
+                // District rooms skip it too. Forty eight wall jobs on a
+                // fourteen tile room were never being satisfied, so every room
+                // hung at phase 4 for ever and the district never advanced to
+                // its second cell. The shell is what makes it read as a
+                // building from outside; the wallpaper is not worth stalling
+                // the whole quarter over.
+                if (Width <= 40 && !District)
                 {
                     int s = Storey;
                     int floorY = GroundY - s * (StoreyHeight - 1);
