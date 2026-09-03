@@ -819,6 +819,105 @@ public class AntfarmSystem : ModSystem
                 $"deliveries={t.Deliveries} stored={t.ItemsStored} chests={t.Chests.Count}");
         }
 
+        // What is actually flying around out there.
+        //
+        // A player standing in the tunnels reported being shot at and hearing
+        // explosions. I guessed vanilla traps, added a disarm, and the counter
+        // came back at zero to four across ten tribes, which disproved it. So
+        // rather than guess a third time: census the live projectiles and the
+        // live NPCs and let the world say what it is spawning.
+        var projCount = new Dictionary<int, int>();
+        int projTotal = 0;
+
+        for (int i = 0; i < Main.maxProjectiles; i++)
+        {
+            Projectile pr = Main.projectile[i];
+            if (pr == null || !pr.active)
+                continue;
+
+            projCount.TryGetValue(pr.type, out int n);
+            projCount[pr.type] = n + 1;
+            projTotal++;
+        }
+
+        if (projTotal > 0)
+        {
+            var top = new List<KeyValuePair<int, int>>(projCount);
+            top.Sort((a, b) => b.Value.CompareTo(a.Value));
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"projectiles: {projTotal} live -");
+
+            for (int i = 0; i < 6 && i < top.Count; i++)
+                sb.Append($" {Lang.GetProjectileName(top[i].Key).Value}({top[i].Key})x{top[i].Value}");
+
+            Mod.Logger.Info(sb.ToString());
+        }
+        else
+        {
+            Mod.Logger.Info("projectiles: none live");
+        }
+
+        var itemCount = new Dictionary<int, int>();
+        int itemTotal = 0;
+
+        for (int i = 0; i < Main.maxItems; i++)
+        {
+            Item it = Main.item[i];
+            if (it == null || !it.active || it.type <= 0)
+                continue;
+
+            itemCount.TryGetValue(it.type, out int c);
+            itemCount[it.type] = c + 1;
+            itemTotal++;
+        }
+
+        if (itemTotal > 0)
+        {
+            var topI = new List<KeyValuePair<int, int>>(itemCount);
+            topI.Sort((a, b) => b.Value.CompareTo(a.Value));
+
+            var sbi = new System.Text.StringBuilder();
+            sbi.Append($"items: {itemTotal} loose -");
+
+            for (int i = 0; i < 6 && i < topI.Count; i++)
+                sbi.Append($" {Lang.GetItemNameValue(topI[i].Key)}x{topI[i].Value}");
+
+            Mod.Logger.Info(sbi.ToString());
+        }
+        else
+        {
+            Mod.Logger.Info("items: none loose");
+        }
+
+        var npcCount = new Dictionary<int, int>();
+        int npcTotal = 0;
+
+        for (int i = 0; i < Main.maxNPCs; i++)
+        {
+            NPC n2 = Main.npc[i];
+            if (n2 == null || !n2.active)
+                continue;
+
+            npcCount.TryGetValue(n2.type, out int c);
+            npcCount[n2.type] = c + 1;
+            npcTotal++;
+        }
+
+        if (npcTotal > 0)
+        {
+            var topN = new List<KeyValuePair<int, int>>(npcCount);
+            topN.Sort((a, b) => b.Value.CompareTo(a.Value));
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"npcs: {npcTotal} live -");
+
+            for (int i = 0; i < 6 && i < topN.Count; i++)
+                sb.Append($" {Lang.GetNPCNameValue(topN[i].Key)}({topN[i].Key})x{topN[i].Value}");
+
+            Mod.Logger.Info(sb.ToString());
+        }
+
         // Sample workers from the least productive tribe. A tribe wide count
         // says they are all outbound; only a single villager's state says why
         // outbound never turns into digging.
@@ -881,6 +980,33 @@ public class AntfarmSystem : ModSystem
         type == TileID.GeyserTrap ||
         type == TileID.PressurePlates;
 
+    /// <summary>
+    /// Remove torches hanging on a tile that is about to be mined, without
+    /// letting them drop. They were going to be destroyed either way.
+    /// </summary>
+    private void ClearAttachedTorches(int x, int y)
+    {
+        Neighbour(x, y - 1);
+        Neighbour(x, y + 1);
+        Neighbour(x - 1, y);
+        Neighbour(x + 1, y);
+    }
+
+    private void Neighbour(int x, int y)
+    {
+        if (x < 1 || y < 1 || x >= Main.maxTilesX - 1 || y >= Main.maxTilesY - 1)
+            return;
+
+        Tile t = Main.tile[x, y];
+
+        if (!t.HasTile || t.TileType != TileID.Torches)
+            return;
+
+        Main.tile[x, y].ClearTile();
+        Snapshot.Set(x, y, false);
+        NetMessage.SendTileSquare(-1, x, y, 1);
+    }
+
     private void Apply(in TileOp op)
     {
         if (op.X < 1 || op.Y < 1 || op.X >= Main.maxTilesX - 1 || op.Y >= Main.maxTilesY - 1)
@@ -908,6 +1034,19 @@ public class AntfarmSystem : ModSystem
                 // sees and hears. KillTile is what triggers them, so hazards
                 // are cleared straight out of the tile array instead. Nothing
                 // fires, nothing drops, and the tunnel still gets dug.
+                // Take attached torches off first, silently.
+                //
+                // Mining drops nothing, but a torch is attached to its host
+                // tile, and Terraria pops it off as a separate item when the
+                // host goes. The tribes light every tunnel they dig and then
+                // dig away the walls they lit, so torches were falling loose
+                // faster than the world could clean them up: a census found
+                // 364 loose torches against a world item cap of 400. Hundreds
+                // of glowing bobbing torch items in a dark cavern is what a
+                // player standing in it sees, and it is why nothing else could
+                // drop either, the cap being full of them.
+                ClearAttachedTorches(op.X, op.Y);
+
                 if (IsHazard(t.TileType))
                 {
                     Main.tile[op.X, op.Y].ClearTile();
