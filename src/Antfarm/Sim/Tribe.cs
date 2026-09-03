@@ -1329,6 +1329,15 @@ public sealed class Tribe
                     Y = home.Y * 16f - 24f,
                 };
 
+                // Born on the plaza, so put them to work on the thing that
+                // is standing right there. The mason quota was already full of
+                // masons stranded at the bottom of the warren, so every child
+                // came out a miner and dug straight back down: the sky crew
+                // never grew past fifteen and the tower gained 36 tiles in
+                // five minutes across all ten tribes.
+                if (TowerX != 0)
+                    child.Role = VillagerRole.Mason;
+
                 child.MaxHealth = inherited.MaxHealth(60);
                 child.Health = child.MaxHealth;
                 Villagers.Add(child);
@@ -1654,6 +1663,12 @@ public sealed class Tribe
                 if (v.Role != VillagerRole.Mason)
                     continue;
 
+                // The sky crew is never shed. They are the only masons who can
+                // reach the tower, and demoting one costs a builder that
+                // cannot be replaced from below.
+                if (v.TileY <= nearSky)
+                    continue;
+
                 if (pass == 0 && v.TileY < deep)
                     continue;
 
@@ -1681,7 +1696,7 @@ public sealed class Tribe
 
             foreach (Villager m in Villagers)
             {
-                if (swaps >= 8)
+                if (swaps >= 64)
                     break;
 
                 if (m.Role != VillagerRole.Mason || m.TileY < deep)
