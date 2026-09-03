@@ -46,6 +46,14 @@ public enum VillagerTask : byte
 public sealed class Villager
 {
     public const float TileSize = 16f;
+    private static int _nextId;
+
+    /// <summary>
+    /// A stable identity, so the client can tell which villager moved where
+    /// between updates and draw the movement instead of the jump.
+    /// </summary>
+    public readonly int Id = System.Threading.Interlocked.Increment(ref _nextId);
+
     public const float Width = 10f;
     public const float Height = 20f;
 

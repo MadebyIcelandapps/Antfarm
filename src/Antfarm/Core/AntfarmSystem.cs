@@ -378,6 +378,7 @@ public class AntfarmSystem : ModSystem
 
         ApplyOps();
         SweepLitter();
+        BanishTorchGod();
         KeepCapitalGround();
         FlushStockpiles();
         Raids();
@@ -969,6 +970,37 @@ public class AntfarmSystem : ModSystem
     /// anything else a player might actually want are left where they fall,
     /// which is the whole reason this is a list and not a wipe.
     /// </summary>
+    /// <summary>
+    /// Send the Torch God home.
+    ///
+    /// Place enough torches close together underground and Terraria spawns an
+    /// entity that fires a barrage of flaming projectiles at the nearest
+    /// player. The tribes light every tunnel they dig, so they were summoning
+    /// it on him over and over: this is the "being shot at by fireworks", and
+    /// the explosions, and it took a projectile census to find because nothing
+    /// in this mod fires anything. The torches are the point of the torches,
+    /// so the event goes rather than the lighting.
+    /// </summary>
+    private void BanishTorchGod()
+    {
+        for (int i = 0; i < Main.maxProjectiles; i++)
+        {
+            Projectile pr = Main.projectile[i];
+
+            if (pr == null || !pr.active || pr.type != ProjectileID.TorchGod)
+                continue;
+
+            pr.active = false;
+            pr.Kill();
+            NetMessage.SendData(MessageID.SyncProjectile, -1, -1, null, i);
+        }
+
+        // The event itself is left alone. Its API is not reachable from a mod
+        // here, and it does not need to be: this runs every tick, so a
+        // projectile it spawns is gone within one frame and the barrage never
+        // reaches anybody.
+    }
+
     private void SweepLitter()
     {
         for (int n = 0; n < 64; n++)
@@ -1923,12 +1955,18 @@ public class AntfarmSystem : ModSystem
 
             lock (VillagerSync.Ghosts)
             {
+                double now = Main.gameTimeCache?.TotalGameTime.TotalSeconds ?? 0;
+
                 foreach (GhostVillager g in VillagerSync.Ghosts)
                 {
-                    if (g.X < left || g.X > right || g.Y < top || g.Y > bottom)
+                    // Draw where it is between the last two reports, not where
+                    // the last packet put it.
+                    g.Sample(now, out float gx, out float gy);
+
+                    if (gx < left || gx > right || gy < top || gy > bottom)
                         continue;
 
-                    DrawOne(pixel, g.X, g.Y, ColourOf(g.TribeId), g.TribeId, g.FacingRight, g.Soldier, g.Undead);
+                    DrawOne(pixel, gx, gy, ColourOf(g.TribeId), g.TribeId, g.FacingRight, g.Soldier, g.Undead);
                     drawn++;
                 }
             }

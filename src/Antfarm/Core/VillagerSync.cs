@@ -11,13 +11,43 @@ namespace Antfarm.Core;
 /// <summary>
 /// One villager as a client sees it: enough to draw, and nothing else.
 /// </summary>
-public struct GhostVillager
+public sealed class GhostVillager
 {
+    public int Id;
+
+    /// <summary>Where the server last said it was, and where it was before.</summary>
     public float X, Y;
+    public float PrevX, PrevY;
+
+    /// <summary>Game time the current target arrived, for interpolation.</summary>
+    public double At;
+
     public byte TribeId;
     public bool FacingRight;
     public bool Undead;
     public bool Soldier;
+
+    /// <summary>
+    /// Where to actually draw it now.
+    ///
+    /// Positions arrive four times a second, and the client drew them raw, so
+    /// every villager stood still for a quarter second and then teleported the
+    /// whole distance at once. Sliding between the last two reports turns the
+    /// same packets into continuous movement.
+    /// </summary>
+    public void Sample(double now, out float x, out float y)
+    {
+        float t = (float)((now - At) / Interval);
+
+        if (t < 0f) t = 0f;
+        if (t > 1f) t = 1f;
+
+        x = PrevX + (X - PrevX) * t;
+        y = PrevY + (Y - PrevY) * t;
+    }
+
+    /// <summary>Seconds between server updates: 15 ticks at 60Hz.</summary>
+    public const double Interval = 15.0 / 60.0;
 }
 
 /// <summary>
@@ -52,6 +82,8 @@ public static class VillagerSync
 
     /// <summary>What the client currently believes is on screen.</summary>
     public static readonly List<GhostVillager> Ghosts = new();
+
+    private static readonly Dictionary<int, GhostVillager> _byId = new();
 
     public static void Broadcast(Mod mod, List<Tribe> tribes)
     {
@@ -97,6 +129,7 @@ public static class VillagerSync
 
         foreach (Villager v in near)
         {
+            packet.Write(v.Id);
             packet.Write(v.X);
             packet.Write(v.Y);
             packet.Write((byte)v.TribeId);
@@ -163,26 +196,47 @@ public static class VillagerSync
         LastReceivedCount = count;
         LastReceivedAt = Main.gameTimeCache?.TotalGameTime.TotalSeconds ?? 0;
 
+        double now = Main.gameTimeCache?.TotalGameTime.TotalSeconds ?? 0;
+
         lock (Ghosts)
         {
+            // Carry the previous report forward by identity, so a villager
+            // that is still on screen slides from where it was rather than
+            // being deleted and recreated somewhere else.
+            _byId.Clear();
+            foreach (GhostVillager g in Ghosts)
+                _byId[g.Id] = g;
+
             Ghosts.Clear();
 
             for (int i = 0; i < count; i++)
             {
+                int id = reader.ReadInt32();
                 float x = reader.ReadSingle();
                 float y = reader.ReadSingle();
                 byte tribe = reader.ReadByte();
                 byte flags = reader.ReadByte();
 
-                Ghosts.Add(new GhostVillager
+                if (!_byId.TryGetValue(id, out GhostVillager g))
+                    g = new GhostVillager { Id = id, PrevX = x, PrevY = y };
+                else
                 {
-                    X = x,
-                    Y = y,
-                    TribeId = tribe,
-                    FacingRight = (flags & 1) != 0,
-                    Undead = (flags & 2) != 0,
-                    Soldier = (flags & 4) != 0,
-                });
+                    // Start from where it is being drawn right now, not from
+                    // the last target, or a dropped packet snaps it backwards.
+                    g.Sample(now, out float sx, out float sy);
+                    g.PrevX = sx;
+                    g.PrevY = sy;
+                }
+
+                g.X = x;
+                g.Y = y;
+                g.At = now;
+                g.TribeId = tribe;
+                g.FacingRight = (flags & 1) != 0;
+                g.Undead = (flags & 2) != 0;
+                g.Soldier = (flags & 4) != 0;
+
+                Ghosts.Add(g);
             }
         }
     }
