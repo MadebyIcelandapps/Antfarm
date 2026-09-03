@@ -866,6 +866,19 @@ public sealed class Tribe
         {
             if (proj.Phase >= Building.LastPhase)
             {
+                // Storey finished. Start the next one rather than the whole
+                // building's next phase: what stands is always complete, and
+                // the tower visibly grows instead of standing as a full height
+                // skeleton for hours.
+                if (proj.Storey < proj.Storeys - 1)
+                {
+                    proj.Storey++;
+                    proj.Phase = 0;
+                    proj.Stalled = 0;
+                    proj.GeneratePhase(block, ctx);
+                    return;
+                }
+
                 // Only a building with blocks in it is a building.
                 if (proj.BlocksLaid == 0)
                 {

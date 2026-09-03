@@ -47,6 +47,15 @@ public sealed class Building
     public bool Underground;
 
     public int Phase;
+
+    /// <summary>
+    /// Which storey is being built. Phases used to span every storey at once,
+    /// so a tower raised its full height skeleton first and only then came
+    /// back for nine thousand floor tiles: for hours it was three bare
+    /// vertical lines in the sky rather than a building. A storey at a time
+    /// means what stands is always finished, and the thing visibly grows.
+    /// </summary>
+    public int Storey;
     public readonly List<BuildJob> Pending = new();
 
     /// <summary>Handed to a villager but not yet reported finished.</summary>
@@ -81,8 +90,8 @@ public sealed class Building
                 // tower is mostly air, and queueing sixteen hundred clearing
                 // jobs for empty sky meant phase 0 never finished and not one
                 // block was ever laid.
-                for (int s = 0; s < Storeys; s++)
                 {
+                    int s = Storey;
                     int floorY = GroundY - s * (StoreyHeight - 1);
                     for (int x = X; x <= Right; x++)
                         for (int y = floorY - StoreyHeight + 1; y <= floorY; y++)
@@ -94,8 +103,8 @@ public sealed class Building
             // 1. Floors, bottom up, with a stairwell column left open so the
             //    storeys are actually connected.
             case 1:
-                for (int s = 0; s < Storeys; s++)
                 {
+                    int s = Storey;
                     int floorY = GroundY - s * (StoreyHeight - 1);
                     for (int x = X; x <= Right; x++)
                     {
@@ -109,8 +118,8 @@ public sealed class Building
 
             // 2. Side walls, with a doorway punched through the ground storey.
             case 2:
-                for (int s = 0; s < Storeys; s++)
                 {
+                    int s = Storey;
                     int floorY = GroundY - s * (StoreyHeight - 1);
                     for (int y = floorY - StoreyHeight + 1; y < floorY; y++)
                     {
@@ -134,6 +143,11 @@ public sealed class Building
             // 3. Roof over the top storey.
             case 3:
             {
+                // Only the top storey gets a roof. Every other storey's ceiling
+                // is the next storey's floor.
+                if (Storey < Storeys - 1)
+                    break;
+
                 int roofY = TopY;
                 for (int x = X; x <= Right; x++)
                     Pending.Add(new BuildJob(x, roofY, block, BuildKind.Block));
@@ -151,30 +165,32 @@ public sealed class Building
                 // is the difference between topping out and never finishing.
                 if (Width <= 40)
                 {
-                    for (int s = 0; s < Storeys; s++)
-                    {
-                        int floorY = GroundY - s * (StoreyHeight - 1);
-                        for (int x = X + 1; x <= Right - 1; x++)
-                            for (int y = floorY - StoreyHeight + 2; y <= floorY - 1; y++)
-                                Pending.Add(new BuildJob(x, y, wallItem, BuildKind.Wall));
-                    }
+                    int s = Storey;
+                    int floorY = GroundY - s * (StoreyHeight - 1);
+                    for (int x = X + 1; x <= Right - 1; x++)
+                        for (int y = floorY - StoreyHeight + 2; y <= floorY - 1; y++)
+                            Pending.Add(new BuildJob(x, y, wallItem, BuildKind.Wall));
                 }
                 break;
 
             // 5. Fit out: a platform under each upper floor so they can walk up
             //    into it, and torches on every storey.
             default:
-                for (int s = 0; s < Storeys; s++)
-                {
-                    int floorY = GroundY - s * (StoreyHeight - 1);
+            {
+                int s = Storey;
+                int floorY = GroundY - s * (StoreyHeight - 1);
 
-                    if (s > 0)
-                        Pending.Add(new BuildJob(X + 1, floorY, block, BuildKind.Platform));
+                if (s > 0)
+                    Pending.Add(new BuildJob(X + 1, floorY, block, BuildKind.Platform));
 
-                    Pending.Add(new BuildJob(X + 2, floorY - 1, ItemID.Torch, BuildKind.Torch));
-                    Pending.Add(new BuildJob(Right - 2, floorY - 1, ItemID.Torch, BuildKind.Torch));
-                }
+                Pending.Add(new BuildJob(X + 2, floorY - 1, ItemID.Torch, BuildKind.Torch));
+                Pending.Add(new BuildJob(Right - 2, floorY - 1, ItemID.Torch, BuildKind.Torch));
+
+                // Lights across a wide frontage, so a monument reads at night.
+                for (int tx = X + 16; tx < Right - 4; tx += 16)
+                    Pending.Add(new BuildJob(tx, floorY - 1, ItemID.Torch, BuildKind.Torch));
                 break;
+            }
         }
     }
 
