@@ -999,7 +999,18 @@ public class AntfarmSystem : ModSystem
         itemType == ItemID.SiltBlock ||
         itemType == ItemID.SandBlock ||
         itemType == ItemID.MudBlock ||
-        itemType == ItemID.ClayBlock;
+        itemType == ItemID.ClayBlock ||
+        itemType == ItemID.SlushBlock ||
+        itemType == ItemID.SnowBlock ||
+        itemType == ItemID.IceBlock ||
+        itemType == ItemID.AshBlock ||
+        itemType == ItemID.GlowingMushroom ||
+        itemType == ItemID.Rope ||
+        // A loose chest is a cache that was knocked off its foundation, which
+        // is a bug being cleaned up rather than treasure. There were 152 of
+        // them on the floor, and with the cap no longer under pressure they
+        // would have sat there for the life of the world.
+        itemType == ItemID.Chest;
 
     private void ApplyOps()
     {
