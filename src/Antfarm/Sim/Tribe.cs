@@ -329,8 +329,35 @@ public sealed class Tribe
     /// early compounded away from everyone: 438 villagers against 44, and
     /// fourteen times the tonnage. Mining alone now has to be a real path up.
     /// </summary>
+    /// <summary>
+    /// How far below its own surface the tribe is allowed to dig, earned by
+    /// what it has built. Starts at about 200 tiles, which is plenty of cavern.
+    /// </summary>
+    public int DepthLimit
+    {
+        get
+        {
+            int seat = HomeY;
+
+            foreach (Settlement st in Settlements)
+                if (st.Y < seat)
+                    seat = st.Y;
+
+            return seat + 200 + Rooms * 8;
+        }
+    }
+
+    /// <summary>
+    /// Population is bought with rooms, not with holes.
+    ///
+    /// Excavation used to dominate this: mined/50 up to 500, against six per
+    /// room. So the fastest way to grow was to dig, the population exploded
+    /// into the thousands, and every one of them was another miner making the
+    /// hole bigger. Rooms are the main term now and digging is a small
+    /// supplement, so a tribe grows by building somewhere to live.
+    /// </summary>
     public int PopulationCap =>
-        40 + Rooms * 6 + (int)(TilesMined / 50 < 500 ? TilesMined / 50 : 500);
+        40 + Rooms * 10 + (int)(TilesMined / 400 < 120 ? TilesMined / 400 : 120);
 
     public void CountTasks(out int idle, out int outbound, out int returning, out int building)
     {
@@ -474,6 +501,18 @@ public sealed class Tribe
             int y = cy + ctx.Rand.Next(local ? -4 : -Reach / 4, radius + 1);
 
             if (!ctx.Snapshot.InBounds(x, y) || y < 40 || y > ctx.Snapshot.Height - 40)
+                continue;
+
+            // A leash on how deep the colony may go, earned by what it builds.
+            //
+            // Nothing stopped them descending, so within an hour every tribe
+            // was at bedrock: masons 1,800 tiles below their own capital, the
+            // surface abandoned, newborns falling down the shaft they had dug
+            // under their own settlement. Every "they only build below ground"
+            // symptom traces back to this. Depth is now bought with rooms, the
+            // same currency as height, so a tribe digs down only as far as it
+            // has built up and the two grow together.
+            if (y > DepthLimit)
                 continue;
 
             // Never accept work outside the tribe's territory, even when the
@@ -1679,7 +1718,10 @@ public sealed class Tribe
         if (n == 0)
             return;
 
-        int wantMason = 1 + n * (Trait == TribeTrait.Builder ? 45 : 30) / 100;
+        // Builders, who mine as needed. It was the other way round, thirty
+        // percent masons against a dig rate hundreds of times the build rate,
+        // which is how you get a strip mine instead of a civilisation.
+        int wantMason = 1 + n * (Trait == TribeTrait.Builder ? 70 : 60) / 100;
         int wantSoldier = 1 + n * (Trait == TribeTrait.Warlike ? 25 : 12) / 100;
 
         int masons = 0, soldiers = 0;

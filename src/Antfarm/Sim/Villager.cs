@@ -754,7 +754,10 @@ public sealed class Villager
         // The op is applied by the main thread, not now. Wait a few ticks
         // before deciding whether it worked, rather than spamming the queue
         // with the same request sixty times a second.
-        _digCooldown = 12;
+        // Slower swings. They were tearing out thousands of tiles a second
+        // against a build rate of about ten, so the world became holes faster
+        // than anything could be built in it.
+        _digCooldown = 34;
 
         if (CarriedCount < CarryCapacity)
             CarriedCount++;

@@ -25,11 +25,11 @@ public class AntfarmConfig : ModConfig
     [Header("Performance")]
 
     [Range(1, 4096)]
-    [DefaultValue(96)]
+    [DefaultValue(32)]
     public int TileOpsPerTick { get; set; }
 
     [Range(1, 64)]
-    [DefaultValue(8)]
+    [DefaultValue(3)]
     public int UnfocusedBudgetMultiplier { get; set; }
 
     [Range(10, 240)]
