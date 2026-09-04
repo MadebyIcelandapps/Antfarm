@@ -1718,10 +1718,29 @@ public sealed class Tribe
         if (n == 0)
             return;
 
-        // Builders, who mine as needed. It was the other way round, thirty
-        // percent masons against a dig rate hundreds of times the build rate,
-        // which is how you get a strip mine instead of a civilisation.
-        int wantMason = 1 + n * (Trait == TribeTrait.Builder ? 70 : 60) / 100;
+        // Builders who mine as needed, in the proportion the bank can feed.
+        //
+        // It used to be thirty percent masons against a dig rate hundreds of
+        // times the build rate, which is how you get a strip mine instead of a
+        // civilisation. Flipping it to a flat sixty overcorrected within
+        // minutes: Duskloam ended up with forty one masons, zero miners and
+        // "no materials", which is the same deadlock wearing the other hat.
+        //
+        // So the split follows the stores. A tribe sitting on materials puts
+        // everyone on the walls; a tribe that has run dry sends them back to
+        // the rock. It settles itself instead of needing a number chosen in
+        // advance for a situation that keeps changing.
+        int stock = BuildStockCount;
+
+        int masonPct = stock > 4000 ? 65
+                     : stock > 1500 ? 50
+                     : stock > 400 ? 30
+                     : 15;
+
+        if (Trait == TribeTrait.Builder)
+            masonPct += 10;
+
+        int wantMason = 1 + n * masonPct / 100;
         int wantSoldier = 1 + n * (Trait == TribeTrait.Warlike ? 25 : 12) / 100;
 
         int masons = 0, soldiers = 0;
